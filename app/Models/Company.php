@@ -43,12 +43,9 @@ class Company extends Model
         return 'slug';
     }
 
-    /**
-     * Relasi Company ke User.
-     */
-    public function users(): BelongsToMany // <-- TAMBAHKAN METHOD INI
+    public function users(): HasMany
     {
-        return $this->belongsToMany(User::class);
+        return $this->hasMany(User::class);
     }
 
     public function deliveryOrders(): HasMany

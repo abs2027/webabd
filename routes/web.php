@@ -40,8 +40,8 @@ Route::get('/{tenant}/delivery-orders/{record}/print', function ($tenant, Delive
 })
 ->name('print.delivery-order')
 ->middleware([
-    Authenticate::class . ':abdgroup',
-    IdentifyTenant::class . ':abdgroup',
+    Authenticate::class . ':admin',
+    IdentifyTenant::class . ':admin',
 ]);
 
 /*
@@ -67,8 +67,8 @@ Route::get('/{tenant}/invoices/{record}/print-invoice', function ($tenant, Invoi
 
 })->name('print.invoice') // <-- Nama rute baru
 ->middleware([
-    Authenticate::class . ':abdgroup',
-    IdentifyTenant::class . ':abdgroup',
+    Authenticate::class . ':admin',
+    IdentifyTenant::class . ':admin',
 ]);
 
 Route::get('/{tenant}/invoices/{record}/print-receipt', function ($tenant, Invoice $record) {
@@ -89,6 +89,6 @@ Route::get('/{tenant}/invoices/{record}/print-receipt', function ($tenant, Invoi
 
 })->name('print.receipt') // <-- Nama rute baru
 ->middleware([
-    Authenticate::class . ':abdgroup',
-    IdentifyTenant::class . ':abdgroup',
+    Authenticate::class . ':admin',
+    IdentifyTenant::class . ':admin',
 ]);

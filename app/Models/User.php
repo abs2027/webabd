@@ -8,6 +8,7 @@ use Filament\Panel;                         // <-- TAMBAHKAN INI
 use Illuminate\Database\Eloquent\Collection;  // <-- TAMBAHKAN INI
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;       // <-- TAMBAHKAN INI
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
@@ -57,6 +58,11 @@ class User extends Authenticatable implements FilamentUser, HasTenants
     public function companies(): BelongsToMany
     {
         return $this->belongsToMany(Company::class);
+    }
+
+    public function company(): BelongsTo
+    {
+        return $this->belongsTo(Company::class);
     }
 
     // =================================================================

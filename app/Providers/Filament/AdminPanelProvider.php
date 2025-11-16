@@ -25,8 +25,8 @@ class AdminPanelProvider extends PanelProvider
     {
         return $panel
             ->default()
-            ->id('abdgroup')
-            ->path('abdgroup')
+            ->id('admin')
+            ->path('admin')
             ->login()
             ->tenant(Company::class, slugAttribute: 'slug')
             ->colors([

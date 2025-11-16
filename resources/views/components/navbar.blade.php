@@ -48,7 +48,7 @@
             </div>
 
             <div class="hidden sm:ml-6 sm:flex sm:items-center space-x-4">
-                <a href="{{ route('filament.abdgroup.auth.login') }}" class="text-sm font-medium text-gray-600 hover:text-gray-900">
+                <a href="{{ route('filament.admin.auth.login') }}" class="text-sm font-medium text-gray-600 hover:text-gray-900">
                     Sign In
                 </a>
                 <a href="/e-procurement" class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700">
