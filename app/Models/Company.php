@@ -23,6 +23,7 @@ class Company extends Model
         'address',   // <-- TAMBAHKAN INI
         'phone',     // <-- TAMBAHKAN INI
         'email',     // <-- TAMBAHKAN INI
+        'business_description',
     ];
 
     /**
@@ -43,9 +44,9 @@ class Company extends Model
         return 'slug';
     }
 
-    public function users(): HasMany
+    public function users(): BelongsToMany
     {
-        return $this->hasMany(User::class);
+        return $this->belongsToMany(User::class);
     }
 
     public function deliveryOrders(): HasMany

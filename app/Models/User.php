@@ -2,12 +2,12 @@
 
 namespace App\Models;
 
-use Filament\Models\Contracts\FilamentUser; // <-- TAMBAHKAN INI
-use Filament\Models\Contracts\HasTenants;    // <-- TAMBAHKAN INI
-use Filament\Panel;                         // <-- TAMBAHKAN INI
-use Illuminate\Database\Eloquent\Collection;  // <-- TAMBAHKAN INI
+use Filament\Models\Contracts\FilamentUser; // <-- PENTING
+use Filament\Models\Contracts\HasTenants;    // <-- PENTING
+use Filament\Panel;                         // <-- PENTING
+use Illuminate\Database\Eloquent\Collection;  // <-- PENTING
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;       // <-- TAMBAHKAN INI
+use Illuminate\Database\Eloquent\Model;       // <-- PENTING
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -27,6 +27,7 @@ class User extends Authenticatable implements FilamentUser, HasTenants
         'name',
         'email',
         'password',
+        'is_superadmin', // <-- Pastikan ini ada di $fillable!
     ];
 
     /**
@@ -49,6 +50,7 @@ class User extends Authenticatable implements FilamentUser, HasTenants
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'is_superadmin' => 'boolean', // <-- Tambahkan cast ini
         ];
     }
 
@@ -60,26 +62,32 @@ class User extends Authenticatable implements FilamentUser, HasTenants
         return $this->belongsToMany(Company::class);
     }
 
-    public function company(): BelongsTo
-    {
-        return $this->belongsTo(Company::class);
-    }
+    /**
+     * Relasi default (mungkin untuk tenant saat ini)
+     * Catatan: Ini mungkin tidak diperlukan jika Anda hanya menggunakan relasi many-to-many.
+     * Hapus jika tidak ada kolom company_id di tabel users.
+     */
+    // public function company(): BelongsTo
+    // {
+    //     return $this->belongsTo(Company::class);
+    // }
 
     // =================================================================
     // METODE-METODE BARU UNTUK FILAMENT MULTITENANCY
     // =================================================================
 
     /**
-     * Metode ini adalah jawaban untuk error Anda.
-     * Kita beritahu Filament di mana menemukan daftar tenant (perusahaan)
+     * Memberitahu Filament daftar tenant (perusahaan) yang dimiliki user ini.
+     * Ini digunakan oleh panel 'admin' (tenant).
      */
     public function getTenants(Panel $panel): Collection
     {
-        return $this->companies()->get(); // <-- Tambahkan ->get()
+        return $this->companies()->get();
     }
 
     /**
-     * Metode ini untuk mengecek apakah user boleh mengakses tenant (perusahaan)
+     * Mengecek apakah user boleh mengakses tenant (perusahaan) tertentu.
+     * Ini digunakan oleh panel 'admin' (tenant).
      */
     public function canAccessTenant(Model $tenant): bool
     {
@@ -87,10 +95,24 @@ class User extends Authenticatable implements FilamentUser, HasTenants
     }
 
     /**
-     * Metode ini adalah standar agar user bisa mengakses panel Filament
+     * Mengecek apakah user boleh mengakses panel tertentu.
+     * INI ADALAH KUNCI UNTUK MEMPERBAIKI ERROR 403 ANDA.
      */
     public function canAccessPanel(Panel $panel): bool
     {
-        return true; // Asumsikan semua user bisa mengakses panel
+        // Jika ID panelnya adalah 'superadmin'
+        if ($panel->getId() === 'superadmin') {
+            // Cek kolom 'is_superadmin'
+            return $this->is_superadmin === true;
+        }
+
+        // Untuk panel 'admin' (panel tenant Anda)
+        if ($panel->getId() === 'admin') {
+            // Izinkan semua user yang terautentikasi (logika tenant akan menangani sisanya)
+            return true; 
+        }
+
+        // Default tolak
+        return false;
     }
 }

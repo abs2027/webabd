@@ -1,16 +1,19 @@
 <?php
 
-namespace App\Filament\Resources;
+namespace App\Filament\Superadmin\Resources;
 
-use App\Filament\Resources\UserResource\Pages;
-use App\Filament\Resources\UserResource\RelationManagers;
+use App\Filament\Superadmin\Resources\UserResource\Pages;
+use App\Filament\Superadmin\Resources\UserResource\RelationManagers;
+use App\Filament\Superadmin\Resources\UserResource\RelationManagers\CompaniesRelationManager;
 use App\Models\User;
 use Filament\Forms;
 use Filament\Forms\Components\Section;
 use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Toggle;
 use Filament\Forms\Form;
 use Filament\Resources\Resource;
 use Filament\Tables;
+use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
@@ -21,15 +24,16 @@ class UserResource extends Resource
 {
     protected static ?string $model = User::class;
 
-    protected static ?string $navigationIcon = 'heroicon-o-users'; // Icon yang sama
-    protected static ?string $tenantOwnershipRelationshipName = 'companies';
+    protected static ?string $navigationIcon = 'heroicon-o-users';
 
     public static function form(Form $form): Form
     {
         return $form
             ->schema([
+                // ===========================================
+                // KODE BARU UNTUK FORM
+                // ===========================================
                 Section::make('Informasi User')
-                    ->description('Membuat user baru untuk perusahaan ini.')
                     ->schema([
                         TextInput::make('name')
                             ->label('Nama')
@@ -40,16 +44,25 @@ class UserResource extends Resource
                             ->email()
                             ->required()
                             ->maxLength(255)
-                            // Cek unik di-scope ke tenant saat ini
-                            ->unique(User::class, 'email', ignoreRecord: true), 
+                            ->unique(User::class, 'email', ignoreRecord: true), // Cek unik
 
                         TextInput::make('password')
                             ->password()
-                            ->dehydrateStateUsing(fn (string $state): string => Hash::make($state))
+                            // Hash password HANYA jika diisi
+                            ->dehydrateStateUsing(fn (?string $state): ?string => 
+                                $state ? Hash::make($state) : null
+                            )
+                            // Hanya simpan ke DB jika diisi
                             ->dehydrated(fn (?string $state): bool => filled($state))
+                            // Wajib diisi HANYA saat membuat user baru
                             ->required(fn (string $context): bool => $context === 'create')
-                            ->label('Password'),
-                    ])->columns(2),
+                            ->label('Password (biarkan kosong jika tidak ingin mengubah)'),
+
+                        Toggle::make('is_superadmin')
+                            ->label('Adalah Superadmin')
+                            ->required(),
+                    ])->columns(2), // Tampilkan dalam 2 kolom
+                // ===========================================
             ]);
     }
 
@@ -57,23 +70,31 @@ class UserResource extends Resource
     {
         return $table
             ->columns([
+                // ===========================================
+                // TAMBAHKAN KODE INI
+                // ===========================================
                 TextColumn::make('name')
                     ->label('Nama User')
-                    ->searchable(),
+                    ->searchable()
+                    ->sortable(),
                 TextColumn::make('email')
-                    ->searchable(),
+                    ->searchable()
+                    ->sortable(),
+                IconColumn::make('is_superadmin')
+                    ->label('Superadmin')
+                    ->boolean(), // Ini akan menampilkan icon centang/silang
                 TextColumn::make('created_at')
                     ->label('Dibuat')
-                    ->dateTime('d/m/Y')
+                    ->dateTime('d/m/Y H:i')
                     ->sortable()
-                    ->toggleable(isToggledHiddenByDefault: true),
+                    ->toggleable(isToggledHiddenByDefault: true), // Sembunyikan by default
+                // ===========================================
             ])
             ->filters([
                 //
             ])
             ->actions([
                 Tables\Actions\EditAction::make(),
-                Tables\Actions\DeleteAction::make(),
             ])
             ->bulkActions([
                 Tables\Actions\BulkActionGroup::make([
@@ -85,7 +106,7 @@ class UserResource extends Resource
     public static function getRelations(): array
     {
         return [
-            //
+            CompaniesRelationManager::class,
         ];
     }
 

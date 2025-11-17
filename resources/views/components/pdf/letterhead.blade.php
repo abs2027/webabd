@@ -5,7 +5,13 @@
 @php
     // Jika data company tidak diberikan, ambil dari tenant yang sedang aktif
     $tenant = $company ?? filament()->getTenant();
-    $logoUrl = $tenant->logo_path ? storage_path('app/public/' . $tenant->logo_path) : null;
+    
+    // Perbaikan: Cek apakah logo_path ada dan file-nya ada di storage
+    // dompdf memerlukan path absolut, bukan URL
+    $logoUrl = null;
+    if ($tenant->logo_path && Storage::disk('public')->exists($tenant->logo_path)) {
+        $logoUrl = storage_path('app/public/' . $tenant->logo_path);
+    }
 @endphp
 
 <style>
@@ -19,7 +25,7 @@
     .logo-container {
         width: 100px; /* Lebar untuk logo */
         vertical-align: top;
-        padding-bottom: 5px; /* <-- TAMBAHKAN INI (5px untuk jarak "dikit") */
+        padding-bottom: 10px; /* Beri jarak bawah agar logo tidak menempel garis */
     }
     .logo {
         max-width: 90px;
@@ -34,12 +40,22 @@
         font-size: 18px;
         font-weight: bold;
         color: #333;
-        margin-bottom: 5px;
+        margin-bottom: 1px; /* <-- DIKURANGI (biar mepet) */
+    }
+    /* =========================================== */
+    /* STYLE BARU ANDA (DISESUAIKAN) */
+    /* =========================================== */
+    .company-tagline {
+        font-size: 11px;
+        /* font-style: italic; */ /* <-- DIHAPUS (tidak miring) */
+        color: #555; /* <-- Diganti warnanya agar seragam */
+        margin: 0 0 8px 0; /* Jarak atas 0 (mepet), bawah 8px (ke alamat) */
+        line-height: 1.4;
     }
     .company-address, .company-contact {
         font-size: 11px;
         color: #555;
-        margin: 2px 0;
+        margin: 0; /* <-- DIBUAT 0 (agar mepet jadi satu blok) */
         line-height: 1.4;
     }
 </style>
@@ -54,6 +70,15 @@
         
         <td class="company-details">
             <div class="company-name">{{ $tenant->name }}</div>
+            
+            <!-- =========================================== -->
+            <!--             DATA BARU ANDA MUNCUL DI SINI     -->
+            <!-- =========================================== -->
+            @if($tenant->business_description)
+            <div class="company-tagline">
+                {{ $tenant->business_description }}
+            </div>
+            @endif
             
             @if($tenant->address)
             <div class="company-address">
