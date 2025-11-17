@@ -19,6 +19,8 @@ class Project extends Model
         'status',
         'start_date',
         'end_date',
+        'payment_term_value', // <-- TAMBAHKAN INI
+        'payment_term_unit',
     ];
 
     // Project ini milik satu Company (Tenant)
@@ -41,5 +43,15 @@ class Project extends Model
     public function frameworkAgreements(): HasMany
     {
         return $this->hasMany(FrameworkAgreement::class);
+    }
+
+    public function recapColumns(): HasMany
+    {
+        return $this->hasMany(RecapColumn::class)->orderBy('order');
+    }
+
+    public function recapRows(): HasMany
+    {
+        return $this->hasMany(RecapRow::class);
     }
 }

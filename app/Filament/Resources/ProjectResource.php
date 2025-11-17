@@ -5,6 +5,9 @@ namespace App\Filament\Resources;
 use App\Filament\Resources\ProjectResource\Pages;
 use App\Filament\Resources\ProjectResource\RelationManagers\FrameworkAgreementsRelationManager;
 use App\Filament\Resources\ProjectResource\RelationManagers\PurchaseOrdersRelationManager;
+use App\Filament\Resources\ProjectResource\RelationManagers\RecapColumnsRelationManager;
+use App\Filament\Resources\ProjectResource\RelationManagers\RecapItemsRelationManager;
+use App\Filament\Resources\ProjectResource\RelationManagers\RecapRowsRelationManager;
 use App\Models\Project;
 use Filament\Forms;
 use Filament\Forms\Form;
@@ -65,6 +68,19 @@ class ProjectResource extends Resource
                             ])
                             ->default('Baru')
                             ->required(),
+                        TextInput::make('payment_term_value')
+                                ->label('Termin Pembayaran')
+                                ->numeric()
+                                ->placeholder('Contoh: 30'),
+
+                        Select::make('payment_term_unit')
+                            ->label('Satuan Termin')
+                            ->options([
+                                'days' => 'Hari',
+                                'months' => 'Bulan',
+                                'years' => 'Tahun',
+                            ])
+                            ->placeholder('Pilih Satuan'),
 
                         DatePicker::make('start_date')
                             ->label('Tanggal Mulai'),
@@ -128,6 +144,8 @@ class ProjectResource extends Resource
         return [
             PurchaseOrdersRelationManager::class,
             FrameworkAgreementsRelationManager::class,
+            RecapColumnsRelationManager::class,
+            RecapRowsRelationManager::class
         ];
     }
 
