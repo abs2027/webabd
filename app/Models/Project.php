@@ -11,6 +11,8 @@ class Project extends Model
 {
     use HasFactory;
 
+    protected $guarded = [];
+
     protected $fillable = [
         'company_id',
         'client_id',
@@ -23,10 +25,14 @@ class Project extends Model
         'payment_term_unit',
     ];
 
-    // Project ini milik satu Company (Tenant)
     public function company(): BelongsTo
     {
         return $this->belongsTo(Company::class);
+    }
+    
+       public function recaps(): HasMany
+    {
+        return $this->hasMany(Recap::class);
     }
 
     // Project ini milik satu Client
@@ -50,8 +56,10 @@ class Project extends Model
         return $this->hasMany(RecapColumn::class)->orderBy('order');
     }
 
-    public function recapRows(): HasMany
-    {
-        return $this->hasMany(RecapRow::class);
-    }
+    // public function recapRows(): HasMany
+    // {
+    //     return $this->hasMany(RecapRow::class);
+    // }
+
+ 
 }

@@ -26,4 +26,10 @@ class RecapRow extends Model
     {
         return $this->belongsTo(Project::class);
     }
+
+    // Satu baris data MILIK SATU periode Recap
+    public function recap(): BelongsTo
+    {
+        return $this->belongsTo(Recap::class);
+    }
 }

@@ -13,8 +13,14 @@ return new class extends Migration
     {
         Schema::create('recap_rows', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('project_id')->constrained()->cascadeOnDelete();
-            $table->json('data')->nullable(); // KUNCI-nya di sini: semua data baris disimpan sebagai JSON
+
+            // ▼▼▼ UBAH INI ▼▼▼
+            // $table->foreignId('project_id')->constrained()->cascadeOnDelete(); // HAPUS INI
+            $table->foreignId('recap_id')->constrained()->cascadeOnDelete(); // TAMBAH INI
+
+            // Kolom JSON 'data' Anda (biarkan seperti aslinya)
+            $table->json('data')->nullable(); 
+
             $table->timestamps();
         });
     }

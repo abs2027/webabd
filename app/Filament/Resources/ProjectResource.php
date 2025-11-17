@@ -8,6 +8,7 @@ use App\Filament\Resources\ProjectResource\RelationManagers\PurchaseOrdersRelati
 use App\Filament\Resources\ProjectResource\RelationManagers\RecapColumnsRelationManager;
 use App\Filament\Resources\ProjectResource\RelationManagers\RecapItemsRelationManager;
 use App\Filament\Resources\ProjectResource\RelationManagers\RecapRowsRelationManager;
+use App\Filament\Resources\RecapResource\RelationManagers\RecapsRelationManager;
 use App\Models\Project;
 use Filament\Forms;
 use Filament\Forms\Form;
@@ -22,6 +23,7 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\DatePicker;
+use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Columns\BadgeColumn; // Untuk status
 
@@ -144,8 +146,10 @@ class ProjectResource extends Resource
         return [
             PurchaseOrdersRelationManager::class,
             FrameworkAgreementsRelationManager::class,
+
             RecapColumnsRelationManager::class,
-            RecapRowsRelationManager::class
+
+            RecapsRelationManager::class
         ];
     }
 

@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Filament\Resources\ProjectResource\RelationManagers;
+namespace App\Filament\Resources\RecapResource\RelationManagers;
 
 use Filament\Forms;
 use Filament\Forms\Form;
@@ -29,10 +29,15 @@ class RecapRowsRelationManager extends RelationManager
     {
         return $form
             ->schema(function (): array {
-                // 1. Ambil project saat ini
-                $project = $this->getOwnerRecord();
-                // 2. Ambil kolom-kolom yang sudah didesain
-                $columns = $project->recapColumns;
+                // 1. Ambil "Periode Recap" saat ini
+                $recap = $this->getOwnerRecord(); 
+                // 2. Dari periode itu, ambil "Project" induknya
+                $project = $recap->project;
+                
+                // ▼▼▼ INI PERBAIKANNYA ▼▼▼
+                // 3. Ambil kolom, TAPI jika $project tidak ada, gunakan array kosong
+                $columns = $project ? $project->recapColumns : [];
+                // ▲▲▲ PERBAIKAN SELESAI ▲▲▲
                 
                 $schema = []; // Ini adalah array untuk form kita
                 
@@ -72,9 +77,15 @@ class RecapRowsRelationManager extends RelationManager
      */
     public function table(Table $table): Table
     {
-        // 1. Ambil project dan kolom-kolomnya
-        $project = $this->getOwnerRecord();
-        $columns = $project->recapColumns;
+        // 1. Ambil "Periode Recap" saat ini
+        $recap = $this->getOwnerRecord(); 
+        // 2. Dari periode itu, ambil "Project" induknya
+        $project = $recap->project;
+        
+        // ▼▼▼ INI PERBAIKANNYA (diterapkan di sini juga) ▼▼▼
+        // 3. Ambil kolom, TAPI jika $project tidak ada, gunakan array kosong
+        $columns = $project ? $project->recapColumns : [];
+        // ▲▲▲ PERBAIKAN SELESAI ▲▲▲
         
         $tableColumns = []; // Array untuk kolom tabel
         
