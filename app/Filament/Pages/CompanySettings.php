@@ -21,7 +21,8 @@ use Filament\Notifications\Notification;
 class CompanySettings extends Page implements HasForms // <-- TAMBAHKAN IMPLEMENTS
 {
     use InteractsWithForms; // <-- TAMBAHKAN USE TRAIT
-
+    protected static ?string $navigationGroup = 'Manajemen Perusahaan';
+    protected static ?int $navigationSort = 1;
     protected static ?string $navigationIcon = 'heroicon-o-building-office';
     protected static ?string $navigationLabel = 'Profil Perusahaan';
     protected static ?string $title = 'Profil Perusahaan';
