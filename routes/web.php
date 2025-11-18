@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\RecapExportController;
 use Illuminate\Support\Facades\Route;
 use App\Models\DeliveryOrder;
 use App\Models\Invoice;
@@ -92,3 +93,5 @@ Route::get('/{tenant}/invoices/{record}/print-receipt', function ($tenant, Invoi
     Authenticate::class . ':admin',
     IdentifyTenant::class . ':admin',
 ]);
+
+Route::get('/recap/{record}/print', RecapExportController::class)->name('recap.print');

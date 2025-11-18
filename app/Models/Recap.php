@@ -14,6 +14,11 @@ class Recap extends Model
     // Ini mengizinkan semua field diisi (sesuaikan jika perlu)
     protected $guarded = [];
 
+    protected $casts = [
+        'start_date' => 'date',
+        'end_date' => 'date',
+    ];
+
     // ▼▼▼ INI YANG MEMPERBAIKI ERROR ANDA ▼▼▼
     // Memberi tahu bahwa satu 'Recap' (periode) MILIK SATU 'Project'
     public function project(): BelongsTo

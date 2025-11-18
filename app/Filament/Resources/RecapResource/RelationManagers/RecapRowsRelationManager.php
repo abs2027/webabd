@@ -10,16 +10,20 @@ use Filament\Tables\Table;
 
 // IMPORT BARU
 use App\Models\RecapColumn;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Select; 
 use Filament\Forms\Components\Section; 
 use Filament\Tables\Columns\TextColumn;
-use Filament\Tables\Columns\Summarizers\Sum; 
+use Filament\Tables\Columns\Summarizers\Sum; // <-- BENAR: Summarizers
 use Filament\Forms\Get; 
 use Filament\Forms\Set; 
 use Illuminate\Support\Facades\DB; 
+use Filament\Tables\Actions\Action; 
+use Illuminate\Support\Str; // <-- Import Str
+use Symfony\Component\HttpFoundation\StreamedResponse; 
 
 class RecapRowsRelationManager extends RelationManager
 {
@@ -28,6 +32,7 @@ class RecapRowsRelationManager extends RelationManager
 
     public function form(Form $form): Form
     {
+        // ... (Tidak ada perubahan di form)
         return $form
             ->schema(function (): array {
                 $recap = $this->getOwnerRecord();
@@ -43,6 +48,7 @@ class RecapRowsRelationManager extends RelationManager
             });
     }
 
+    // ... (Fungsi buildSchema dan helper tidak berubah)
     protected function buildSchema(iterable $columns, string $baseKey): array
     {
         $schema = [];
@@ -135,11 +141,14 @@ class RecapRowsRelationManager extends RelationManager
         }
         $project = $recap->project;
         $tableColumns = [];
+        
+        // Kita butuh daftar kolom ini untuk Export juga
         $dataColumns = $project->recapColumns()
                               ->where('type', '!=', 'group')
                               ->orderBy('order')
                               ->get();
 
+        // ... (Looping kolom tabel tampilan tidak berubah) ...
         foreach ($dataColumns as $column) {
             $key = 'data.';
             $path = [];
@@ -157,65 +166,128 @@ class RecapRowsRelationManager extends RelationManager
                                     ->label($column->name)
                                     ->formatStateUsing(fn ($state) => $state ? "Lihat File" : "-");
                     break;
-                
                 case 'money':
                     $tableColumn = TextColumn::make($key)
                                     ->label($column->name)
                                     ->money('IDR', true);
-                    
                     if ($column->is_summarized) {
                         $tableColumn->summarize(
                             Sum::make()
                                 ->money('IDR', true)
-                                // ▼▼▼ PERBAIKAN LABEL DI SINI ▼▼▼
                                 ->label('Total ' . $column->name) 
-                                // ▲▲▲ SELESAI ▲▲▲
                                 ->using(function ($query) use ($key) {
                                     $path = substr($key, 5); 
                                     $segments = collect(explode('.', $path))
                                         ->map(fn($segment) => '"' . $segment . '"')
                                         ->join('.');
-                                    
-                                    return $query->sum(
-                                        DB::raw("CAST(JSON_UNQUOTE(JSON_EXTRACT(data, '$." . $segments . "')) AS DECIMAL(15, 2))")
-                                    );
+                                    return $query->sum(DB::raw("CAST(JSON_UNQUOTE(JSON_EXTRACT(data, '$." . $segments . "')) AS DECIMAL(15, 2))"));
                                 })
                         );
                     }
                     break;
-                
                 case 'number':
                      $tableColumn = TextColumn::make($key)->label($column->name)->numeric();
-                     
                      if ($column->is_summarized) {
                         $tableColumn->summarize(
                             Sum::make()
-                                // ▼▼▼ PERBAIKAN LABEL DI SINI ▼▼▼
                                 ->label('Total ' . $column->name)
-                                // ▲▲▲ SELESAI ▲▲▲
                                 ->using(function ($query) use ($key) {
                                     $path = substr($key, 5); 
                                     $segments = collect(explode('.', $path))
                                         ->map(fn($segment) => '"' . $segment . '"')
                                         ->join('.');
-                                    
-                                    return $query->sum(
-                                        DB::raw("CAST(JSON_UNQUOTE(JSON_EXTRACT(data, '$." . $segments . "')) AS DECIMAL(15, 2))")
-                                    );
+                                    return $query->sum(DB::raw("CAST(JSON_UNQUOTE(JSON_EXTRACT(data, '$." . $segments . "')) AS DECIMAL(15, 2))"));
                                 })
                         );
                      }
                      break;
-
                 default:
                     $tableColumn = TextColumn::make($key)->label($column->name);
                     break;
             }
             $tableColumns[] = $tableColumn;
         }
+
         return $table
             ->columns($tableColumns)
             ->headerActions([
+                // ▼▼▼ FITUR EXPORT BARU ▼▼▼
+                Action::make('export')
+                    ->label('Export Excel')
+                    ->icon('heroicon-o-arrow-down-tray')
+                    ->color('success')
+                    ->action(function () use ($recap, $dataColumns) {
+                        // 1. Siapkan Header
+                        $headers = $dataColumns->pluck('name')->toArray();
+                        array_unshift($headers, 'No'); // Tambah kolom No di awal
+
+                        // 2. Siapkan Data
+                        $rows = $recap->recapRows()->get(); // Ambil semua data
+                        
+                        // 3. Fungsi untuk membuat CSV
+                        $callback = function () use ($headers, $rows, $dataColumns) {
+                            $file = fopen('php://output', 'w');
+                            
+                            // Tulis Header
+                            fputcsv($file, $headers);
+
+                            // Tulis Data Baris per Baris
+                            foreach ($rows as $index => $row) {
+                                $rowData = [ $index + 1 ]; // Kolom No
+                                
+                                foreach ($dataColumns as $col) {
+                                    // Cari value di JSON (logika path sama seperti table)
+                                    $value = $row->data;
+                                    $tempCol = $col;
+                                    $path = [];
+                                    
+                                    while ($tempCol != null) {
+                                        array_unshift($path, $tempCol->name);
+                                        $tempCol = $tempCol->parent;
+                                    }
+
+                                    // Telusuri array data berdasarkan path
+                                    foreach ($path as $key) {
+                                        if (isset($value[$key])) {
+                                            $value = $value[$key];
+                                        } else {
+                                            $value = null;
+                                            break;
+                                        }
+                                    }
+                                    
+                                    // Format data jika perlu
+                                    if (is_array($value)) $value = json_encode($value);
+                                    
+                                    $rowData[] = $value;
+                                }
+                                fputcsv($file, $rowData);
+                            }
+                            fclose($file);
+                        };
+
+                        // 4. Return Download Response
+                       $filename = 'Rekap-' . Str::slug($recap->name) . '-' . now()->toDateString() . '.csv';
+
+                        return response()->stream($callback, 200, [
+                            'Content-Type' => 'text/csv; charset=UTF-8',
+                            // pastikan filename di-quote dan juga sediakan filename* untuk UTF-8
+                            'Content-Disposition' => "attachment; filename=\"{$filename}\"; filename*=UTF-8''" . rawurlencode($filename),
+                            'Pragma' => 'no-cache',
+                            'Cache-Control' => 'must-revalidate, post-check=0, pre-check=0',
+                            'Expires' => '0',
+                        ]);
+                    }),
+                // ▲▲▲ SELESAI FITUR EXPORT ▲▲▲
+
+                Action::make('export_pdf')
+                    ->label('Print PDF') // Ganti label jadi Print/Preview
+                    ->icon('heroicon-o-printer') // Ganti icon printer biar cocok
+                    ->color('danger')
+                    // BUKAN ->action(), TAPI ->url()
+                    ->url(fn ($livewire) => route('recap.print', ['record' => $livewire->getOwnerRecord()]))
+                    ->openUrlInNewTab() ,
+                
                 Tables\Actions\CreateAction::make(),
             ])
             ->actions([
