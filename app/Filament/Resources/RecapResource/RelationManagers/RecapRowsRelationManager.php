@@ -16,8 +16,10 @@ use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Select; 
 use Filament\Forms\Components\Section; 
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Columns\Summarizers\Sum; 
 use Filament\Forms\Get; 
 use Filament\Forms\Set; 
+use Illuminate\Support\Facades\DB; 
 
 class RecapRowsRelationManager extends RelationManager
 {
@@ -33,12 +35,10 @@ class RecapRowsRelationManager extends RelationManager
                     return [];
                 }
                 $project = $recap->project;
-
                 $parentColumns = $project->recapColumns()
                                         ->whereNull('parent_id')
                                         ->orderBy('order')
                                         ->get();
-
                 return $this->buildSchema($parentColumns, 'data'); 
             });
     }
@@ -46,73 +46,46 @@ class RecapRowsRelationManager extends RelationManager
     protected function buildSchema(iterable $columns, string $baseKey): array
     {
         $schema = [];
-
         foreach ($columns as $column) {
             $children = $column->children()->orderBy('order')->get();
             $currentKey = $baseKey . '.' . $column->name; 
-
             if ($column->type == 'group' && $children->isNotEmpty()) {
                 $childSchema = $this->buildSchema($children, $currentKey); 
                 $schema[] = Section::make($column->name) 
                                 ->label($column->name)
                                 ->schema($childSchema)
                                 ->columns(2); 
-
             } else if ($column->type != 'group') {
                 $field = null;
-
                 switch ($column->type) {
-                    case 'text':
-                        $field = TextInput::make($currentKey);
-                        break;
-                    
+                    case 'text': $field = TextInput::make($currentKey); break;
                     case 'select':
                         $options = $column->options ? array_map('trim', explode(',', $column->options)) : [];
                         $optionsArray = array_combine($options, $options);
-                        $field = Select::make($currentKey)
-                                    ->options($optionsArray)
-                                    ->searchable();
+                        $field = Select::make($currentKey)->options($optionsArray)->searchable();
                         break;
-
-                    case 'number': // Angka Biasa (Qty, dll)
-                        $field = TextInput::make($currentKey)->numeric();
-                        // (Logika kalkulasi di bawah)
-                        break;
-
-                    case 'money': // Uang (Harga, Jumlah)
-                        $field = TextInput::make($currentKey)
-                                    ->numeric()
-                                    ->prefix('Rp'); // Tambahkan prefix Rp di form input
-                        // (Logika kalkulasi di bawah)
-                        break;
-
-                    case 'date':
-                        $field = DatePicker::make($currentKey);
-                        break;
-                    case 'file':
-                        $field = FileUpload::make($currentKey)
-                            ->directory('recap-data-files')
-                            ->disk('public');
-                        break;
+                    case 'number': $field = TextInput::make($currentKey)->numeric(); break;
+                    case 'money': $field = TextInput::make($currentKey)->numeric()->prefix('Rp'); break;
+                    case 'date': $field = DatePicker::make($currentKey); break;
+                    case 'file': $field = FileUpload::make($currentKey)->directory('recap-data-files')->disk('public'); break;
                 }
-                
-                // ▼▼▼ LOGIKA KALKULASI (Berlaku untuk 'number' dan 'money') ▼▼▼
-                if (in_array($column->type, ['number', 'money'])) {
-                    
+                if (in_array($column->type, ['number', 'money', 'select'])) {
+                    $cleanNumber = function ($val) {
+                        if (is_numeric($val)) return (float) $val;
+                        $val = str_replace(['Rp', '.', ' '], '', $val);
+                        $val = str_replace(',', '.', $val); 
+                        return (float) $val;
+                    };
                     if ($column->operand_a && $column->operator && $column->operand_b) {
                             $basePath = substr($currentKey, 0, strrpos($currentKey, '.'));
                             $pathA = $basePath . '.' . $column->operand_a;
                             $pathB = $basePath . '.' . $column->operand_b;
-
-                            $field
-                            ->disabled() 
-                            ->dehydrated()
+                            $field->disabled()->dehydrated()
                             ->default(function (Get $get) use ($column, $pathA, $pathB) { return 0; })
-                            ->formatStateUsing(function ($state, Get $get) use ($column, $pathA, $pathB) {
+                            ->formatStateUsing(function ($state, Get $get) use ($column, $pathA, $pathB, $cleanNumber) {
                                 if ($state) return $state;
-                                // Bersihkan karakter non-numeric (seperti Rp, titik) sebelum hitung
-                                $valA = (float) preg_replace('/[^0-9.-]/', '', $get($pathA) ?? 0);
-                                $valB = (float) preg_replace('/[^0-9.-]/', '', $get($pathB) ?? 0);
+                                $valA = $cleanNumber($get($pathA));
+                                $valB = $cleanNumber($get($pathB));
                                 switch ($column->operator) {
                                     case '*': return $valA * $valB;
                                     case '+': return $valA + $valB;
@@ -122,48 +95,33 @@ class RecapRowsRelationManager extends RelationManager
                                 }
                             });
                     }
-                    
-                    // Cek apakah kolom ini dipakai di formula lain
-                    $isUsed = RecapColumn::where('operand_a', $column->name)
-                                        ->orWhere('operand_b', $column->name)
-                                        ->exists();
+                    $isUsed = RecapColumn::where('operand_a', $column->name)->orWhere('operand_b', $column->name)->exists();
                     if ($isUsed) {
-                        $field
-                            ->live(onBlur: true) 
-                            ->afterStateUpdated(function (Get $get, Set $set) use ($currentKey) {
-                                // Cari kolom-kolom yang bergantung pada kolom ini
-                                // (Logika path yang sudah diperbaiki sebelumnya)
+                        $isSelect = $column->type === 'select';
+                        $field->live(onBlur: !$isSelect)->afterStateUpdated(function (Get $get, Set $set) use ($currentKey, $cleanNumber) {
                                 $parts = explode('.', $currentKey);
-                                $colName = array_pop($parts); // Nama kolom ini
+                                $colName = array_pop($parts); 
                                 $basePath = implode('.', $parts); 
-                                
-                                // Cari RecapColumn target yang menggunakan kolom ini sebagai operand
-                                $targets = RecapColumn::where('operand_a', $colName)
-                                                    ->orWhere('operand_b', $colName)
-                                                    ->get();
-                                                    
+                                $targets = RecapColumn::where('operand_a', $colName)->orWhere('operand_b', $colName)->get();
                                 foreach($targets as $target) {
                                      $targetPath = $basePath . '.' . $target->name;
                                      $pathA = $basePath . '.' . $target->operand_a;
                                      $pathB = $basePath . '.' . $target->operand_b;
-                                     
-                                     $valA = (float) preg_replace('/[^0-9.-]/', '', $get($pathA) ?? 0);
-                                     $valB = (float) preg_replace('/[^0-9.-]/', '', $get($pathB) ?? 0);
+                                     $valA = $cleanNumber($get($pathA));
+                                     $valB = $cleanNumber($get($pathB));
                                      $res = 0;
                                      switch ($target->operator) {
                                          case '*': $res = $valA * $valB; break;
-                                         // ... operator lain
+                                         case '+': $res = $valA + $valB; break;
+                                         case '-': $res = $valA - $valB; break;
+                                         case '/': $res = ($valB != 0) ? $valA / $valB : 0; break;
                                      }
                                      $set($targetPath, $res);
                                 }
                             });
                     }
                 }
-                // ▲▲▲ SELESAI LOGIKA KALKULASI ▲▲▲
-                
-                if ($field) {
-                    $schema[] = $field->label($column->name);
-                }
+                if ($field) { $schema[] = $field->label($column->name); }
             }
         }
         return $schema;
@@ -200,17 +158,53 @@ class RecapRowsRelationManager extends RelationManager
                                     ->formatStateUsing(fn ($state) => $state ? "Lihat File" : "-");
                     break;
                 
-                // ▼▼▼ FORMAT UANG DI TABEL ▼▼▼
                 case 'money':
                     $tableColumn = TextColumn::make($key)
                                     ->label($column->name)
-                                    ->money('IDR', true); // Format: Rp 20.000
+                                    ->money('IDR', true);
+                    
+                    if ($column->is_summarized) {
+                        $tableColumn->summarize(
+                            Sum::make()
+                                ->money('IDR', true)
+                                // ▼▼▼ PERBAIKAN LABEL DI SINI ▼▼▼
+                                ->label('Total ' . $column->name) 
+                                // ▲▲▲ SELESAI ▲▲▲
+                                ->using(function ($query) use ($key) {
+                                    $path = substr($key, 5); 
+                                    $segments = collect(explode('.', $path))
+                                        ->map(fn($segment) => '"' . $segment . '"')
+                                        ->join('.');
+                                    
+                                    return $query->sum(
+                                        DB::raw("CAST(JSON_UNQUOTE(JSON_EXTRACT(data, '$." . $segments . "')) AS DECIMAL(15, 2))")
+                                    );
+                                })
+                        );
+                    }
                     break;
-                // ▲▲▲ SELESAI ▲▲▲
                 
-                // Format Angka Biasa
                 case 'number':
                      $tableColumn = TextColumn::make($key)->label($column->name)->numeric();
+                     
+                     if ($column->is_summarized) {
+                        $tableColumn->summarize(
+                            Sum::make()
+                                // ▼▼▼ PERBAIKAN LABEL DI SINI ▼▼▼
+                                ->label('Total ' . $column->name)
+                                // ▲▲▲ SELESAI ▲▲▲
+                                ->using(function ($query) use ($key) {
+                                    $path = substr($key, 5); 
+                                    $segments = collect(explode('.', $path))
+                                        ->map(fn($segment) => '"' . $segment . '"')
+                                        ->join('.');
+                                    
+                                    return $query->sum(
+                                        DB::raw("CAST(JSON_UNQUOTE(JSON_EXTRACT(data, '$." . $segments . "')) AS DECIMAL(15, 2))")
+                                    );
+                                })
+                        );
+                     }
                      break;
 
                 default:

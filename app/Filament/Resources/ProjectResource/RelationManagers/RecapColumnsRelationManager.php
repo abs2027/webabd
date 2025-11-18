@@ -13,6 +13,7 @@ use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea; 
 use Filament\Forms\Components\Fieldset;
+use Filament\Forms\Components\Toggle; // <-- IMPORT TOGGLE
 use Filament\Forms\Get;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Grouping\Group;
@@ -36,8 +37,8 @@ class RecapColumnsRelationManager extends RelationManager
                     ->label('Tipe Kolom')
                     ->options([
                         'text' => 'Teks Singkat',
-                        'number' => 'Angka (Qty, Nomor)', // Angka biasa
-                        'money' => 'Uang (Rp)', // <-- TIPE BARU
+                        'number' => 'Angka (Qty, Nomor)',
+                        'money' => 'Uang (Rp)', 
                         'select' => 'Pilihan (Dropdown)', 
                         'date' => 'Tanggal',
                         'file' => 'Upload File',
@@ -66,7 +67,14 @@ class RecapColumnsRelationManager extends RelationManager
                     ->numeric()
                     ->default(0),
                 
-                // Field Opsi untuk Dropdown
+                // ▼▼▼ FITUR BARU: SUMMARY TOGGLE ▼▼▼
+                Toggle::make('is_summarized')
+                    ->label('Tampilkan Total (Sum) di Footer?')
+                    ->inline(false)
+                    // Hanya muncul untuk kolom Angka atau Uang
+                    ->visible(fn (Get $get) => in_array($get('type'), ['number', 'money'])),
+                // ▲▲▲ SELESAI ▲▲▲
+
                 Textarea::make('options')
                     ->label('Opsi Pilihan (Pisahkan dengan Koma)')
                     ->placeholder('Contoh: Lokasi A, Lokasi B, Lokasi C')
@@ -74,7 +82,6 @@ class RecapColumnsRelationManager extends RelationManager
                     ->required(fn (Get $get) => $get('type') === 'select')
                     ->columnSpanFull(),
 
-                // Logika Kalkulasi (Muncul untuk Number DAN Money)
                 Fieldset::make('Logika Kalkulasi Otomatis')
                     ->schema([
                         TextInput::make('operand_a')
@@ -93,7 +100,6 @@ class RecapColumnsRelationManager extends RelationManager
                             ->placeholder('Misal: Harga'),
                     ])
                     ->columns(3)
-                    // Muncul jika tipe number ATAU money
                     ->visible(fn (Get $get) => in_array($get('type'), ['number', 'money'])), 
                     
             ])->columns(2);

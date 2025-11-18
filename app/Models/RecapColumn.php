@@ -20,7 +20,8 @@ class RecapColumn extends Model
         'order',
         'operand_a',
         'operator',
-        'operand_b'
+        'operand_b',
+        'is_summarized'
     ];
 
     public function project(): BelongsTo
