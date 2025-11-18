@@ -11,8 +11,12 @@ use Filament\Tables\Table;
 // IMPORT BARU
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\Textarea; 
+use Filament\Forms\Components\Fieldset;
+use Filament\Forms\Get;
 use Filament\Tables\Columns\TextColumn;
-use Filament\Tables\Columns\BadgeColumn;
+use Filament\Tables\Grouping\Group;
+use App\Models\RecapColumn; 
 
 class RecapColumnsRelationManager extends RelationManager
 {
@@ -27,21 +31,71 @@ class RecapColumnsRelationManager extends RelationManager
                     ->label('Nama Kolom')
                     ->required()
                     ->placeholder('Misal: Conferma, QTY, Menu Harian'),
-                
+
                 Select::make('type')
                     ->label('Tipe Kolom')
                     ->options([
-                        'text' => 'Teks',
-                        'number' => 'Angka',
+                        'text' => 'Teks Singkat',
+                        'number' => 'Angka (Qty, Nomor)', // Angka biasa
+                        'money' => 'Uang (Rp)', // <-- TIPE BARU
+                        'select' => 'Pilihan (Dropdown)', 
                         'date' => 'Tanggal',
                         'file' => 'Upload File',
+                        'group' => 'Grup (Induk Saja)'
                     ])
-                    ->required(),
-                
+                    ->required()
+                    ->live(), 
+
+                Select::make('parent_id')
+                    ->label('Kolom Induk (Jika ini turunan)')
+                    ->searchable()
+                    ->placeholder('Ini adalah kolom induk (top-level)')
+                    ->options(function () {
+                        $project = $this->getOwnerRecord();
+                        if (!$project) {
+                            return [];
+                        }
+                        
+                        return $project->recapColumns()
+                            ->where('type', 'group') 
+                            ->pluck('name', 'id');
+                    }),
+
                 TextInput::make('order')
                     ->label('Urutan')
                     ->numeric()
                     ->default(0),
+                
+                // Field Opsi untuk Dropdown
+                Textarea::make('options')
+                    ->label('Opsi Pilihan (Pisahkan dengan Koma)')
+                    ->placeholder('Contoh: Lokasi A, Lokasi B, Lokasi C')
+                    ->visible(fn (Get $get) => $get('type') === 'select')
+                    ->required(fn (Get $get) => $get('type') === 'select')
+                    ->columnSpanFull(),
+
+                // Logika Kalkulasi (Muncul untuk Number DAN Money)
+                Fieldset::make('Logika Kalkulasi Otomatis')
+                    ->schema([
+                        TextInput::make('operand_a')
+                            ->label('Nama Kolom A')
+                            ->placeholder('Misal: Orderan'),
+                        Select::make('operator')
+                            ->label('Operator Kalkulasi')
+                            ->options([
+                                '*' => 'Kali (*)',
+                                '+' => 'Tambah (+)',
+                                '-' => 'Kurang (-)',
+                                '/' => 'Bagi (/)',
+                            ]),
+                        TextInput::make('operand_b')
+                            ->label('Nama Kolom B')
+                            ->placeholder('Misal: Harga'),
+                    ])
+                    ->columns(3)
+                    // Muncul jika tipe number ATAU money
+                    ->visible(fn (Get $get) => in_array($get('type'), ['number', 'money'])), 
+                    
             ])->columns(2);
     }
 
@@ -51,8 +105,12 @@ class RecapColumnsRelationManager extends RelationManager
             ->recordTitleAttribute('name')
             ->columns([
                 TextColumn::make('name')->label('Nama Kolom')->sortable(),
-                BadgeColumn::make('type')->label('Tipe Kolom'),
+                TextColumn::make('type')->label('Tipe Kolom')->badge(),
                 TextColumn::make('order')->label('Urutan')->sortable(),
+            ])
+            ->groups([
+                Group::make('parent.name')
+                    ->label('Kelompok Induk'),
             ])
             ->headerActions([
                 Tables\Actions\CreateAction::make(),
@@ -60,7 +118,6 @@ class RecapColumnsRelationManager extends RelationManager
             ->actions([
                 Tables\Actions\EditAction::make(),
                 Tables\Actions\DeleteAction::make(),
-            ])
-            ->reorderable('order'); // <-- Fitur drag-and-drop untuk urutan!
+            ]);
     }
 }
