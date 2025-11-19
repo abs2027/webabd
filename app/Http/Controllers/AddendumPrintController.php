@@ -26,6 +26,6 @@ class AddendumPrintController extends Controller
             'qrCode' => $qrCode, // Kirim variabel QR
         ])->setPaper('a4', 'portrait');
 
-        return $pdf->stream('Form-Adendum-' . $record->name . '.pdf');
+        return $pdf->stream('Form-MOM-' . $record->name . '.pdf');
     }
 }

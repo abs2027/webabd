@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
-    <title>Berita Acara - {{ $addendum->name }}</title>
+    <title>Minute of Meeting - {{ $addendum->name }}</title>
     <style>
         /* 1. MARGIN HALAMAN */
         @page { margin: 1cm 2cm; }
@@ -133,7 +133,7 @@
 
     <!-- JUDUL -->
     <div class="title-container">
-        <div class="title">BERITA ACARA / MINUTES OF MEETING</div>
+        <div class="title">MINUTES OF MEETING</div>
         <div class="subtitle">Nomor: .................................................</div>
     </div>
 
@@ -166,7 +166,7 @@
     <!-- AREA TULIS TANGAN -->
     <div class="handwriting-area">
         <div class="instruction">(Tulis rincian hasil meeting di sini)</div>
-        @for($i=0; $i<8; $i++)
+        @for($i=0; $i<15; $i++)
             <div class="dotted-line"></div>
         @endfor
     </div>
