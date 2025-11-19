@@ -10,46 +10,65 @@ use Carbon\Carbon;
 class RecapTrendChart extends ChartWidget
 {
     protected static ?string $heading = 'Tren Data Rekapitulasi';
-    
-    // Atur tinggi maksimal chart agar tidak terlalu mendominasi layar
     protected static ?string $maxHeight = '300px';
     
-
-    // Properti untuk menerima record dari halaman View
     public ?Model $record = null;
+
+    // Properti bawaan Filament untuk menyimpan pilihan Filter saat ini
+    public ?string $filter = null; 
+
+    // ▼▼▼ BAGIAN BARU: MENGISI OPSI DROPDOWN ▼▼▼
+    protected function getFilters(): ?array
+    {
+        // Pastikan record ada
+        if (!$this->record) return [];
+
+        // Ambil semua kolom yang: 
+        // 1. Tipe Angka/Uang 
+        // 2. Fitur Summary-nya AKTIF
+        return $this->record->recapType->recapColumns()
+            ->whereIn('type', ['number', 'money'])
+            ->where('is_summarized', true)
+            ->orderBy('order')
+            ->pluck('name', 'name') // Key=Nama, Label=Nama
+            ->toArray();
+    }
 
     protected function getData(): array
     {
-        // Pastikan kita punya record Recap yang sedang dibuka
         if (!$this->record) {
             return ['datasets' => [], 'labels' => []];
         }
 
         $recap = $this->record;
-        
-        // Pastikan relasi recapType dimuat
-        $recap->load('recapType');
         $recapType = $recap->recapType;
 
-        // 1. Cari Kolom Target (Sumbu Y)
-        // Kriteria: Tipe 'number' atau 'money' DAN fitur Summary aktif
-        $targetColumn = $recapType->recapColumns()
-            ->whereIn('type', ['number', 'money'])
-            ->where('is_summarized', true)
-            ->orderBy('order') // Ambil yang pertama urutannya
-            ->first(); 
+        // ▼▼▼ LOGIKA PEMILIHAN KOLOM YANG LEBIH PINTAR ▼▼▼
+        
+        // 1. Cek apakah User sedang memilih sesuatu di Dropdown ($this->filter)
+        $targetName = $this->filter;
 
-        // Jika tidak ada kolom yang cocok, kembalikan grafik kosong
-        if (!$targetColumn) {
+        // 2. Jika TIDAK ada yang dipilih (awal loading), ambil kolom pertama sebagai default
+        if (!$targetName) {
+            $firstColumn = $recapType->recapColumns()
+                ->whereIn('type', ['number', 'money'])
+                ->where('is_summarized', true)
+                ->orderBy('order')
+                ->first();
+            
+            $targetName = $firstColumn ? $firstColumn->name : null;
+        }
+
+        // Jika masih tidak ada kolom (misal belum bikin kolom summary), return kosong
+        if (!$targetName) {
             return ['datasets' => [], 'labels' => []];
         }
 
-        // 2. Cari Kolom Tanggal (Untuk Sumbu X)
-        $dateColumn = $recapType->recapColumns()
-            ->where('type', 'date')
-            ->first();
+        // Update Judul Chart agar dinamis sesuai pilihan
+        self::$heading = 'Tren: ' . $targetName;
 
-        // 3. Ambil Data Baris
+        // 3. Ambil Data Baris & Kolom Tanggal
+        $dateColumn = $recapType->recapColumns()->where('type', 'date')->first();
         $rows = $recap->recapRows()->get();
         
         $labels = [];
@@ -57,37 +76,26 @@ class RecapTrendChart extends ChartWidget
 
         foreach ($rows as $index => $row) {
             $dataJSON = $row->data;
-            
-            // --- LOGIKA MENCARI NILAI Y ---
             $yValue = 0;
-            // Flatten array JSON untuk memudahkan pencarian key
             $flatData = Arr::dot($dataJSON);
             
-            // Cari value yang key-nya mengandung nama kolom target
-            // Contoh key flattened: "data.Total Harga" atau "Informasi.Biaya"
+            // --- LOGIKA PENCARIAN NILAI ---
             foreach ($flatData as $key => $val) {
-                // Kita cek apakah key diakhiri dengan nama kolom target
-                if (str_ends_with($key, $targetColumn->name)) {
-                    // Bersihkan format uang (Rp, titik, koma) agar jadi float murni
-                    // Contoh: "Rp 1.500.000" -> 1500000
+                // Cek apakah key mengandung NAMA YANG DIPILIH ($targetName)
+                if (str_ends_with($key, $targetName)) {
                     $cleanVal = str_replace(['Rp', '.', ' '], '', $val);
-                    $cleanVal = str_replace(',', '.', $cleanVal); // Ubah koma desimal jadi titik
+                    $cleanVal = str_replace(',', '.', $cleanVal);
                     $yValue = (float) $cleanVal;
-                    break; // Ketemu, berhenti looping
+                    break;
                 }
             }
             
-            // --- LOGIKA MENCARI LABEL X ---
-            $xLabel = "Data #" . ($index + 1); // Default: Nomor Urut
-            
+            // --- LOGIKA LABEL TANGGAL (Sama seperti sebelumnya) ---
+            $xLabel = "Data #" . ($index + 1);
             if ($dateColumn) {
                 foreach ($flatData as $key => $val) {
                     if (str_ends_with($key, $dateColumn->name) && !empty($val)) {
-                        try {
-                            $xLabel = Carbon::parse($val)->format('d M');
-                        } catch (\Exception $e) {
-                            // Jika format tanggal error, tetap pakai default
-                        }
+                        try { $xLabel = Carbon::parse($val)->format('d M'); } catch (\Exception $e) {}
                         break;
                     }
                 }
@@ -100,13 +108,13 @@ class RecapTrendChart extends ChartWidget
         return [
             'datasets' => [
                 [
-                    'label' => $targetColumn->name, // Judul garis sesuai nama kolom (misal: "Total Harga")
+                    'label' => $targetName, // Label garis sesuai pilihan dropdown
                     'data' => $dataPoints,
-                    'borderColor' => '#3b82f6', // Warna Biru Filament (Primary-500)
+                    'borderColor' => '#3b82f6',
                     'pointBackgroundColor' => '#3b82f6',
-                    'fill' => 'start', // Arsir area di bawah garis
-                    'backgroundColor' => 'rgba(59, 130, 246, 0.1)', // Warna arsir transparan
-                    'tension' => 0.3, // Kelengkungan garis (0 = lurus kaku, 0.4 = mulus)
+                    'fill' => 'start',
+                    'backgroundColor' => 'rgba(59, 130, 246, 0.1)',
+                    'tension' => 0.3,
                 ],
             ],
             'labels' => $labels,

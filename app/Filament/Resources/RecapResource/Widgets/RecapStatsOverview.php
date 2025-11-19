@@ -10,9 +10,8 @@ use Illuminate\Support\Arr;
 class RecapStatsOverview extends BaseWidget
 {
     public ?Model $record = null;
-    
 
-    // ▼▼▼ 2. PAKSA FULL WIDTH (Agar memanjang di atas) ▼▼▼
+    // Agar widget memanjang penuh
     protected int | string | array $columnSpan = 'full';
 
     protected function getStats(): array
@@ -20,67 +19,79 @@ class RecapStatsOverview extends BaseWidget
         if (!$this->record) {
             return [];
         }
-        
-        // ... (Kode logika getStats biarkan sama seperti sebelumnya) ...
-        // Saya hanya menyalin bagian atas untuk konteks
-        
+
         $recap = $this->record;
         $recap->load('recapType');
-        $recapType = $recap->recapType;
-
-        $targetColumn = $recapType->recapColumns()
+        
+        // 1. AMBIL SEMUA KOLOM TARGET
+        $targetColumns = $recap->recapType->recapColumns()
             ->whereIn('type', ['number', 'money'])
             ->where('is_summarized', true)
             ->orderBy('order')
-            ->first();
+            ->get();
 
+        // Ambil data baris
         $rows = $recap->recapRows()->get();
-        $totalValue = 0;
         $rowCount = $rows->count();
-        
-        if ($targetColumn) {
+
+        $stats = []; 
+
+        // 2. LOOPING SETIAP KOLOM TARGET
+        foreach ($targetColumns as $column) {
+            $totalValue = 0;
+            $chartData = []; // Array untuk menampung data grafik kecil (sparkline)
+            
+            // Hitung total & kumpulkan data untuk chart
             foreach ($rows as $row) {
                 $dataJSON = $row->data;
                 $flatData = Arr::dot($dataJSON);
+                
+                $foundValue = 0; // Default 0 jika data baris ini kosong
+
                 foreach ($flatData as $key => $val) {
-                    if (str_ends_with($key, $targetColumn->name)) {
+                    if (str_ends_with($key, $column->name)) {
                         $cleanVal = str_replace(['Rp', '.', ' '], '', $val);
                         $cleanVal = str_replace(',', '.', $cleanVal);
-                        $totalValue += (float) $cleanVal;
-                        break;
+                        $foundValue = (float) $cleanVal;
+                        break; 
                     }
                 }
+
+                $totalValue += $foundValue;
+                $chartData[] = $foundValue; // Masukkan ke array chart
             }
-        }
 
-        $formattedTotal = $totalValue;
-        if ($targetColumn && $targetColumn->type === 'money') {
-            $formattedTotal = 'Rp ' . number_format($totalValue, 0, ',', '.');
-        } else {
-            $formattedTotal = number_format($totalValue, 0, ',', '.');
-        }
+            // Format Tampilan (Uang vs Angka)
+            if ($column->type === 'money') {
+                $formattedTotal = 'Rp ' . number_format($totalValue, 0, ',', '.');
+                $icon = 'heroicon-m-banknotes';
+            } else {
+                $formattedTotal = number_format($totalValue, 0, ',', '.');
+                $icon = 'heroicon-m-calculator';
+            }
 
-        $averageValue = $rowCount > 0 ? ($totalValue / $rowCount) : 0;
-        $formattedAvg = $targetColumn && $targetColumn->type === 'money' 
-            ? 'Rp ' . number_format($averageValue, 0, ',', '.') 
-            : number_format($averageValue, 2, ',', '.');
+            // ▼▼▼ LOGIKA PERBAIKAN LABEL ▼▼▼
+            // Cek apakah nama kolom sudah diawali kata "Total" (case-insensitive)
+            // Jika nama kolom: "Total Harga" -> Label: "Total Harga"
+            // Jika nama kolom: "Orderan"     -> Label: "Total Orderan"
+            $label = (stripos($column->name, 'Total') === 0) 
+                ? $column->name 
+                : 'Total ' . $column->name;
 
-        return [
-            Stat::make('Total ' . ($targetColumn->name ?? 'Nilai'), $formattedTotal)
-                ->description('Akumulasi seluruh periode')
-                ->descriptionIcon('heroicon-m-banknotes')
+            // 3. BUAT KARTU
+            $stats[] = Stat::make($label, $formattedTotal)
+                ->description('Akumulasi ' . $column->name)
+                ->descriptionIcon($icon)
                 ->color('success')
-                ->chart([7, 2, 10, 3, 15, 4, 17]),
+                ->chart($chartData); // Gunakan data asli untuk grafik background
+        }
 
-            Stat::make('Rata-rata per Data', $formattedAvg)
-                ->description('Nilai rata-rata harian/transaksi')
-                ->descriptionIcon('heroicon-m-calculator')
-                ->color('warning'),
+        // 4. KARTU TOTAL BARIS
+        $stats[] = Stat::make('Total Data Input', $rowCount . ' Baris')
+            ->description('Jumlah entri data')
+            ->descriptionIcon('heroicon-m-list-bullet')
+            ->color('primary');
 
-            Stat::make('Total Data', $rowCount . ' Baris')
-                ->description('Jumlah entri yang diinput')
-                ->descriptionIcon('heroicon-m-list-bullet')
-                ->color('primary'),
-        ];
+        return $stats;
     }
 }

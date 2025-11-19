@@ -10,25 +10,43 @@ class RecapDistributionChart extends ChartWidget
 {
     protected static ?string $heading = 'Proporsi Kategori';
     protected static ?string $maxHeight = '300px';
+    
     public ?Model $record = null;
 
-    // Konfigurasi Bar Chart
+    // Properti bawaan Filament untuk menyimpan pilihan Filter
+    public ?string $filter = null; 
+
+    // ▼▼▼ BAGIAN BARU: ISI FILTER DENGAN KOLOM TIPE 'SELECT' ▼▼▼
+    protected function getFilters(): ?array
+    {
+        if (!$this->record) return [];
+
+        // Ambil semua kolom yang tipenya 'select' (Pilihan/Dropdown)
+        // Karena grafik Proporsi/Distribusi hanya masuk akal untuk data Kategori
+        return $this->record->recapType->recapColumns()
+            ->where('type', 'select')
+            ->orderBy('order')
+            ->pluck('name', 'name') // Key=Nama, Label=Nama
+            ->toArray();
+    }
+
+    // Konfigurasi Bar Chart (Horizontal)
     protected static ?array $options = [
-        'indexAxis' => 'y', // 'y' = Bar Horizontal (Ke Samping), 'x' = Bar Vertikal (Ke Atas)
+        'indexAxis' => 'y', 
         'plugins' => [
             'legend' => [
-                'display' => false, // Sembunyikan legend karena label sudah ada di sumbu Y
+                'display' => false, 
             ],
         ],
         'scales' => [
             'x' => [
-                'display' => true, // Tampilkan angka di sumbu X (Jumlah)
+                'display' => true, 
                 'grid' => [
                     'display' => false,
                 ],
             ],
             'y' => [
-                'display' => true, // Tampilkan label kategori di sumbu Y
+                'display' => true, 
                 'grid' => [
                     'display' => false,
                 ],
@@ -47,19 +65,29 @@ class RecapDistributionChart extends ChartWidget
         $recap->load('recapType');
         $recapType = $recap->recapType;
 
-        // 1. Cari Kolom Target (Tipe 'select')
-        $targetColumn = $recapType->recapColumns()
-            ->where('type', 'select')
-            ->orderBy('order')
-            ->first();
+        // ▼▼▼ LOGIKA DINAMIS SEPERTI TREND CHART ▼▼▼
+        
+        // 1. Cek apakah ada Filter yang dipilih User
+        $targetName = $this->filter;
 
-        if (!$targetColumn) {
+        // 2. Jika kosong (awal buka), ambil kolom 'select' pertama
+        if (!$targetName) {
+            $firstCol = $recapType->recapColumns()
+                ->where('type', 'select')
+                ->orderBy('order')
+                ->first();
+            
+            $targetName = $firstCol ? $firstCol->name : null;
+        }
+
+        if (!$targetName) {
             return ['datasets' => [], 'labels' => []];
         }
         
-        self::$heading = 'Proporsi ' . $targetColumn->name;
+        // Update Judul agar user tahu sedang lihat data apa
+        self::$heading = 'Proporsi: ' . $targetName;
 
-        // 2. Hitung Data
+        // 3. Hitung Data berdasarkan Nama Kolom yang dipilih
         $rows = $recap->recapRows()->get();
         $distribution = [];
 
@@ -68,8 +96,10 @@ class RecapDistributionChart extends ChartWidget
             $flatData = Arr::dot($dataJSON);
             
             foreach ($flatData as $key => $val) {
-                if (str_ends_with($key, $targetColumn->name)) {
-                    $label = $val ?: 'Tidak Ada Data';
+                // Cek apakah key JSON berakhiran dengan nama kolom target
+                if (str_ends_with($key, $targetName)) {
+                    $label = $val ?: 'Tidak Ada Data'; // Handle jika kosong
+                    
                     if (!isset($distribution[$label])) {
                         $distribution[$label] = 0;
                     }
@@ -87,12 +117,11 @@ class RecapDistributionChart extends ChartWidget
                 [
                     'label' => 'Jumlah',
                     'data' => $dataPoints,
-                    // Warna Batang (Biru Filament)
                     'backgroundColor' => '#3b82f6', 
                     'borderColor' => '#3b82f6',
                     'borderWidth' => 1,
-                    'borderRadius' => 4, // Sudut tumpul biar manis
-                    'barThickness' => 20, // Ketebalan batang
+                    'borderRadius' => 4, 
+                    'barThickness' => 20, 
                 ],
             ],
             'labels' => $labels,
@@ -101,6 +130,6 @@ class RecapDistributionChart extends ChartWidget
 
     protected function getType(): string
     {
-        return 'bar'; // Tipe Chart: Bar
+        return 'bar'; 
     }
 }
