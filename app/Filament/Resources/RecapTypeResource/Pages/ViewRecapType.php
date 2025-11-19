@@ -5,7 +5,6 @@ namespace App\Filament\Resources\RecapTypeResource\Pages;
 use App\Filament\Resources\RecapTypeResource;
 use Filament\Actions; 
 use Filament\Resources\Pages\ViewRecord;
-// IMPORT DUA WIDGET
 use App\Filament\Resources\RecapTypeResource\Widgets\CompareRecapsChart; 
 use App\Filament\Resources\RecapTypeResource\Widgets\CompareRecapsDistributionChart; 
 
@@ -15,6 +14,11 @@ use Filament\Actions\Action;
 class ViewRecapType extends ViewRecord
 {
     protected static string $resource = RecapTypeResource::class;
+
+    // ▼▼▼ 1. TAMBAHKAN PROPERTI UNTUK MENYIMPAN MEMORI FILTER ▼▼▼
+    public array $savedPeriodIds = [];
+    public string $savedChartMode = 'cumulative'; // Default awal
+    // ▲▲▲ SELESAI ▲▲▲
 
     public function getTitle(): string
     {
@@ -29,6 +33,14 @@ class ViewRecapType extends ViewRecord
                 ->icon('heroicon-o-funnel') 
                 ->color('info')
                 ->modalWidth('lg')
+                
+                // ▼▼▼ 2. ISI FORM DENGAN DATA YANG TERSIMPAN SEBELUMNYA ▼▼▼
+                ->fillForm(fn (): array => [
+                    'period_ids' => $this->savedPeriodIds,
+                    'chart_mode' => $this->savedChartMode,
+                ])
+                // ▲▲▲ SELESAI ▲▲▲
+
                 ->form([
                     Select::make('period_ids')
                         ->label('Pilih Periode (Maksimal 5)')
@@ -43,19 +55,31 @@ class ViewRecapType extends ViewRecord
                                 ->pluck('name', 'id');
                         })
                         ->required(),
+
+                    Select::make('chart_mode')
+                        ->label('Mode Tampilan Grafik')
+                        ->options([
+                            'cumulative' => 'Progress Akumulasi (Kurva Naik)',
+                            'daily' => 'Fluktuasi Harian (Naik Turun)',
+                        ])
+                        ->default('cumulative')
+                        ->required(),
                 ])
                 ->action(function (array $data) {
-                    // ▼▼▼ UPDATE DISINI: KIRIM KE DUA WIDGET SEKALIGUS ▼▼▼
-                    
-                    // 1. Kirim ke Grafik Trend (Line Chart)
-                    $this->dispatch('update-chart-periods', periodIds: $data['period_ids'])
-                         ->to(CompareRecapsChart::class);
-
-                    // 2. Kirim ke Grafik Distribusi (Bar Chart Baru)
-                    $this->dispatch('update-chart-periods', periodIds: $data['period_ids'])
-                         ->to(CompareRecapsDistributionChart::class);
-                         
+                    // ▼▼▼ 3. SIMPAN PILIHAN USER KE MEMORI (PROPERTI) ▼▼▼
+                    $this->savedPeriodIds = $data['period_ids'];
+                    $this->savedChartMode = $data['chart_mode'];
                     // ▲▲▲ SELESAI ▲▲▲
+
+                    // Kirim data ke Widget
+                    $this->dispatch('update-chart-periods', 
+                        periodIds: $data['period_ids'], 
+                        mode: $data['chart_mode'] 
+                    )->to(CompareRecapsChart::class);
+
+                    $this->dispatch('update-chart-periods', 
+                        periodIds: $data['period_ids']
+                    )->to(CompareRecapsDistributionChart::class);
                 }),
 
             Actions\EditAction::make()
@@ -64,12 +88,11 @@ class ViewRecapType extends ViewRecord
         ];
     }
 
-    // ▼▼▼ DAFTARKAN KEDUA WIDGET DISINI ▼▼▼
     protected function getHeaderWidgets(): array
     {
         return [
-            CompareRecapsChart::class,            // Grafik 1 (Trend Progress)
-            CompareRecapsDistributionChart::class, // Grafik 2 (Distribusi Kategori)
+            CompareRecapsChart::class,            
+            CompareRecapsDistributionChart::class, 
         ];
     }
     
