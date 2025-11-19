@@ -70,6 +70,11 @@ class Project extends Model
         return $this->hasManyThrough(Recap::class, RecapType::class);
     }
 
+    public function addendums()
+    {
+        return $this->hasMany(Addendum::class);
+    }
+
     // ============================================================
     // ⚠️ HUBUNGAN LAMA (NONAKTIFKAN)
     // Kita matikan supaya kodingan lama tidak salah ambil jalur.

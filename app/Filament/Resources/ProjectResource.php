@@ -3,6 +3,7 @@
 namespace App\Filament\Resources;
 
 use App\Filament\Resources\ProjectResource\Pages;
+use App\Filament\Resources\ProjectResource\RelationManagers\AddendumsRelationManager;
 // ... imports relation managers ...
 use App\Filament\Resources\ProjectResource\RelationManagers\FrameworkAgreementsRelationManager;
 use App\Filament\Resources\ProjectResource\RelationManagers\PurchaseOrdersRelationManager;
@@ -77,13 +78,6 @@ class ProjectResource extends Resource
                     ->color('primary')
                     // URL-nya kita arahkan ke halaman VIEW
                     ->url(fn (Project $record): string => Pages\ViewProject::getUrl(['record' => $record])),
-
-                // 2. Tombol "UBAH INFO" -> Tetap arahkan ke EditProject
-                Tables\Actions\EditAction::make()
-                    ->label('Ubah Info')
-                    ->iconButton()
-                    ->color('gray')
-                    ->tooltip('Ubah Informasi Kontrak'),
             ])
             ->bulkActions([
                 Tables\Actions\BulkActionGroup::make([
@@ -96,6 +90,7 @@ class ProjectResource extends Resource
     {
         return [
             FrameworkAgreementsRelationManager::class,
+            AddendumsRelationManager::class,
             PurchaseOrdersRelationManager::class,
             RecapTypesRelationManager::class,
         ];
