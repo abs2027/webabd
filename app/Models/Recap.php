@@ -11,7 +11,6 @@ class Recap extends Model
 {
     use HasFactory;
     
-    // Ini mengizinkan semua field diisi (sesuaikan jika perlu)
     protected $guarded = [];
 
     protected $casts = [
@@ -19,17 +18,37 @@ class Recap extends Model
         'end_date' => 'date',
     ];
 
-    // ▼▼▼ INI YANG MEMPERBAIKI ERROR ANDA ▼▼▼
-    // Memberi tahu bahwa satu 'Recap' (periode) MILIK SATU 'Project'
-    public function project(): BelongsTo
+    // ==========================================================
+    // ▼▼▼ PERUBAHAN PENTING DI SINI ▼▼▼
+    // ==========================================================
+
+    /**
+     * HUBUNGAN BARU:
+     * Periode Rekap sekarang milik "Jenis Rekap" (RecapType).
+     * Contoh: Periode Oktober milik "Rekap Solar".
+     */
+    public function recapType(): BelongsTo
     {
-        return $this->belongsTo(Project::class);
+        return $this->belongsTo(RecapType::class);
     }
-    // ▲▲▲ PASTI BAGIAN INI YANG HILANG ▲▲▲
 
+    /**
+     * JEMBATAN (HELPER):
+     * Karena kolom 'project_id' sudah dihapus, fungsi project() yg lama akan error.
+     * Kita ganti dengan "Accessor" pintar.
+     * * Jadi kalau kamu panggil $recap->project, dia akan otomatis
+     * mencari Project lewat jalur RecapType.
+     */
+    public function getProjectAttribute()
+    {
+        // Jika punya tipe rekap, ambil project dari tipe tersebut
+        return $this->recapType ? $this->recapType->project : null;
+    }
 
-    // Relasi ini juga penting untuk 'RecapRowsRelationManager'
-    // Memberi tahu bahwa satu 'Recap' (periode) PUNYA BANYAK 'RecapRow' (data)
+    // ==========================================================
+    // ▲▲▲ SELESAI PERUBAHAN ▲▲▲
+    // ==========================================================
+
     public function recapRows(): HasMany
     {
         return $this->hasMany(RecapRow::class);

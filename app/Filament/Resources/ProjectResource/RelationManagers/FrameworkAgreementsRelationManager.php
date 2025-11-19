@@ -20,6 +20,11 @@ class FrameworkAgreementsRelationManager extends RelationManager
     protected static string $relationship = 'frameworkAgreements'; // <-- Relasi FA
     protected static ?string $title = 'Framework Agreements (FA)'; // <-- Judul FA
 
+    public function isReadOnly(): bool
+    {
+        return false;
+    }
+
     public function form(Form $form): Form
     {
         return $form

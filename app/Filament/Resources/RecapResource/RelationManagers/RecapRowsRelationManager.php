@@ -8,7 +8,6 @@ use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Tables;
 use Filament\Tables\Table;
 
-// IMPORT BARU
 use App\Models\RecapColumn;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Filament\Forms\Components\DatePicker;
@@ -17,12 +16,12 @@ use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Select; 
 use Filament\Forms\Components\Section; 
 use Filament\Tables\Columns\TextColumn;
-use Filament\Tables\Columns\Summarizers\Sum; // <-- BENAR: Summarizers
+use Filament\Tables\Columns\Summarizers\Sum;
 use Filament\Forms\Get; 
 use Filament\Forms\Set; 
 use Illuminate\Support\Facades\DB; 
 use Filament\Tables\Actions\Action; 
-use Illuminate\Support\Str; // <-- Import Str
+use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\StreamedResponse; 
 
 class RecapRowsRelationManager extends RelationManager
@@ -30,31 +29,42 @@ class RecapRowsRelationManager extends RelationManager
     protected static string $relationship = 'recapRows';
     protected static ?string $title = '2. Data Rekaplitulasi';
 
+    public function isReadOnly(): bool
+    {
+        return false;
+    }
+
     public function form(Form $form): Form
     {
-        // ... (Tidak ada perubahan di form)
         return $form
             ->schema(function (): array {
                 $recap = $this->getOwnerRecord();
-                if (!$recap || !$recap->project) {
+                
+                // Cek validasi dasar
+                if (!$recap || !$recap->recapType) {
                     return [];
                 }
-                $project = $recap->project;
-                $parentColumns = $project->recapColumns()
+
+                // ▼▼▼ PERUBAHAN 1: Ambil kolom dari RecapType, bukan Project ▼▼▼
+                $recapType = $recap->recapType;
+                
+                $parentColumns = $recapType->recapColumns()
                                         ->whereNull('parent_id')
                                         ->orderBy('order')
                                         ->get();
+                // ▲▲▲ SELESAI PERUBAHAN 1 ▲▲▲
+
                 return $this->buildSchema($parentColumns, 'data'); 
             });
     }
 
-    // ... (Fungsi buildSchema dan helper tidak berubah)
     protected function buildSchema(iterable $columns, string $baseKey): array
     {
         $schema = [];
         foreach ($columns as $column) {
             $children = $column->children()->orderBy('order')->get();
             $currentKey = $baseKey . '.' . $column->name; 
+            
             if ($column->type == 'group' && $children->isNotEmpty()) {
                 $childSchema = $this->buildSchema($children, $currentKey); 
                 $schema[] = Section::make($column->name) 
@@ -75,6 +85,8 @@ class RecapRowsRelationManager extends RelationManager
                     case 'date': $field = DatePicker::make($currentKey); break;
                     case 'file': $field = FileUpload::make($currentKey)->directory('recap-data-files')->disk('public'); break;
                 }
+
+                // Logika Kalkulasi (Aritmatika)
                 if (in_array($column->type, ['number', 'money', 'select'])) {
                     $cleanNumber = function ($val) {
                         if (is_numeric($val)) return (float) $val;
@@ -136,19 +148,23 @@ class RecapRowsRelationManager extends RelationManager
     public function table(Table $table): Table
     {
         $recap = $this->getOwnerRecord();
-        if (!$recap || !$recap->project) {
+        
+        // ▼▼▼ PERUBAHAN 2: Validasi & Ambil kolom dari RecapType ▼▼▼
+        if (!$recap || !$recap->recapType) {
             return $table->columns([]); 
         }
-        $project = $recap->project;
-        $tableColumns = [];
+
+        $recapType = $recap->recapType;
         
         // Kita butuh daftar kolom ini untuk Export juga
-        $dataColumns = $project->recapColumns()
+        // Ambil dari $recapType->recapColumns()
+        $dataColumns = $recapType->recapColumns()
                               ->where('type', '!=', 'group')
                               ->orderBy('order')
                               ->get();
+        // ▲▲▲ SELESAI PERUBAHAN 2 ▲▲▲
 
-        // ... (Looping kolom tabel tampilan tidak berubah) ...
+        $tableColumns = [];
         foreach ($dataColumns as $column) {
             $key = 'data.';
             $path = [];
@@ -211,42 +227,32 @@ class RecapRowsRelationManager extends RelationManager
         return $table
             ->columns($tableColumns)
             ->headerActions([
-                // ▼▼▼ FITUR EXPORT BARU ▼▼▼
                 Action::make('export')
                     ->label('Export Excel')
                     ->icon('heroicon-o-arrow-down-tray')
                     ->color('success')
                     ->action(function () use ($recap, $dataColumns) {
-                        // 1. Siapkan Header
                         $headers = $dataColumns->pluck('name')->toArray();
-                        array_unshift($headers, 'No'); // Tambah kolom No di awal
+                        array_unshift($headers, 'No'); 
 
-                        // 2. Siapkan Data
-                        $rows = $recap->recapRows()->get(); // Ambil semua data
+                        $rows = $recap->recapRows()->get(); 
                         
-                        // 3. Fungsi untuk membuat CSV
                         $callback = function () use ($headers, $rows, $dataColumns) {
                             $file = fopen('php://output', 'w');
-                            
-                            // Tulis Header
                             fputcsv($file, $headers);
 
-                            // Tulis Data Baris per Baris
                             foreach ($rows as $index => $row) {
-                                $rowData = [ $index + 1 ]; // Kolom No
+                                $rowData = [ $index + 1 ];
                                 
                                 foreach ($dataColumns as $col) {
-                                    // Cari value di JSON (logika path sama seperti table)
                                     $value = $row->data;
                                     $tempCol = $col;
                                     $path = [];
-                                    
                                     while ($tempCol != null) {
                                         array_unshift($path, $tempCol->name);
                                         $tempCol = $tempCol->parent;
                                     }
 
-                                    // Telusuri array data berdasarkan path
                                     foreach ($path as $key) {
                                         if (isset($value[$key])) {
                                             $value = $value[$key];
@@ -255,10 +261,7 @@ class RecapRowsRelationManager extends RelationManager
                                             break;
                                         }
                                     }
-                                    
-                                    // Format data jika perlu
                                     if (is_array($value)) $value = json_encode($value);
-                                    
                                     $rowData[] = $value;
                                 }
                                 fputcsv($file, $rowData);
@@ -266,25 +269,21 @@ class RecapRowsRelationManager extends RelationManager
                             fclose($file);
                         };
 
-                        // 4. Return Download Response
                        $filename = 'Rekap-' . Str::slug($recap->name) . '-' . now()->toDateString() . '.csv';
 
                         return response()->stream($callback, 200, [
                             'Content-Type' => 'text/csv; charset=UTF-8',
-                            // pastikan filename di-quote dan juga sediakan filename* untuk UTF-8
                             'Content-Disposition' => "attachment; filename=\"{$filename}\"; filename*=UTF-8''" . rawurlencode($filename),
                             'Pragma' => 'no-cache',
                             'Cache-Control' => 'must-revalidate, post-check=0, pre-check=0',
                             'Expires' => '0',
                         ]);
                     }),
-                // ▲▲▲ SELESAI FITUR EXPORT ▲▲▲
 
                 Action::make('export_pdf')
-                    ->label('Print PDF') // Ganti label jadi Print/Preview
-                    ->icon('heroicon-o-printer') // Ganti icon printer biar cocok
+                    ->label('Print PDF') 
+                    ->icon('heroicon-o-printer') 
                     ->color('danger')
-                    // BUKAN ->action(), TAPI ->url()
                     ->url(fn ($livewire) => route('recap.print', ['record' => $livewire->getOwnerRecord()]))
                     ->openUrlInNewTab() ,
                 

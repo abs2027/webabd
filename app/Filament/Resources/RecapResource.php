@@ -3,7 +3,7 @@
 namespace App\Filament\Resources;
 
 use App\Filament\Resources\RecapResource\Pages;
-use App\Filament\Resources\RecapResource\RelationManagers\RecapRowsRelationManager; 
+use App\Filament\Resources\RecapResource\RelationManagers\RecapRowsRelationManager;
 use App\Models\Recap;
 use Filament\Forms;
 use Filament\Forms\Form;
@@ -11,7 +11,8 @@ use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\SoftDeletingScope;
+use Filament\Forms\Components\Section; // Import Section
+use Filament\Facades\Filament; // Import Filament Facade
 
 class RecapResource extends Resource
 {
@@ -20,36 +21,46 @@ class RecapResource extends Resource
     protected static ?string $navigationIcon = 'heroicon-o-rectangle-stack';
     protected static bool $shouldRegisterNavigation = false;
 
-    // ▼▼▼ PERUBAHAN FLOW DI SINI ▼▼▼
-
-    // 1. HAPUS ATAU KOMENTARI BARIS INI
-    // protected static ?string $tenantOwnershipRelationshipName = 'project.company';
-
-    // 2. TAMBAHKAN BARIS INI UNTUK MEMATIKAN PENGECEKAN
+    // ▼▼▼ 1. MATIKAN SCOPE OTOMATIS (Sama seperti RecapType) ▼▼▼
     protected static bool $isScopedToTenant = false;
 
-    // ▲▲▲ SELESAI ▲▲▲
-
+    // ▼▼▼ 2. GANTI DENGAN FILTER MANUAL (Agar Data Aman) ▼▼▼
+    public static function getEloquentQuery(): Builder
+    {
+        // Filter: Hanya tampilkan Recap yang RecapType -> Project-nya milik Company ini
+        return parent::getEloquentQuery()->whereHas('recapType.project', function ($query) {
+            $query->where('company_id', Filament::getTenant()->id);
+        });
+    }
 
     public static function form(Form $form): Form
     {
         return $form
-        ->schema([
-            Forms\Components\TextInput::make('name')
-                ->label('Nama Periode')
-                ->required(),
-            Forms\Components\DatePicker::make('start_date')
-                ->label('Tanggal Mulai'),
-            Forms\Components\DatePicker::make('end_date')
-                ->label('Tanggal Selesai'),
-        ]);
+            ->schema([
+                // ▼▼▼ 3. BUNGKUS DALAM SECTION COLLAPSIBLE ▼▼▼
+                Section::make('Informasi Periode')
+                    ->schema([
+                        Forms\Components\TextInput::make('name')
+                            ->label('Nama Periode')
+                            ->required(),
+                        Forms\Components\DatePicker::make('start_date')
+                            ->label('Tanggal Mulai'),
+                        Forms\Components\DatePicker::make('end_date')
+                            ->label('Tanggal Selesai'),
+                    ])
+                    ->columns(3)
+                    ->collapsible()
+                    // Tutup otomatis saat mode 'view' agar user fokus ke tabel data
+                    ->collapsed(fn (string $operation) => $operation === 'view'),
+                // ▲▲▲ SELESAI BUNGKUS ▲▲▲
+            ]);
     }
 
     public static function table(Table $table): Table
     {
         return $table
             ->columns([
-                //
+                // Kita kosongkan karena list diakses lewat RelationManager
             ])
             ->filters([
                 //
@@ -74,8 +85,12 @@ class RecapResource extends Resource
     public static function getPages(): array
     {
         return [
-            // 'index' => Pages\ListRecaps::route('/'), // <-- HAPUS BARIS INI
-            'create' => Pages\CreateRecap::route('/create'), // Biarkan (walau tidak terpakai)
+            'index' => Pages\ListRecaps::route('/'),
+            'create' => Pages\CreateRecap::route('/create'),
+            
+            // ▼▼▼ 4. DAFTARKAN HALAMAN VIEW ▼▼▼
+            'view' => Pages\ViewRecap::route('/{record}'),
+            
             'edit' => Pages\EditRecap::route('/{record}/edit'),
         ];
     }

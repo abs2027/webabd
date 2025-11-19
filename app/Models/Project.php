@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasManyThrough; // Tambahan untuk jalan pintas
 
 class Project extends Model
 {
@@ -21,7 +22,7 @@ class Project extends Model
         'status',
         'start_date',
         'end_date',
-        'payment_term_value', // <-- TAMBAHKAN INI
+        'payment_term_value',
         'payment_term_unit',
     ];
 
@@ -29,13 +30,7 @@ class Project extends Model
     {
         return $this->belongsTo(Company::class);
     }
-    
-       public function recaps(): HasMany
-    {
-        return $this->hasMany(Recap::class);
-    }
 
-    // Project ini milik satu Client
     public function client(): BelongsTo
     {
         return $this->belongsTo(Client::class);
@@ -51,15 +46,42 @@ class Project extends Model
         return $this->hasMany(FrameworkAgreement::class);
     }
 
-    public function recapColumns(): HasMany
+    // ============================================================
+    // ▼▼▼ PERUBAHAN DI SINI ▼▼▼
+    // ============================================================
+
+    /**
+     * 1. RELASI UTAMA BARU
+     * Project memiliki banyak Jenis Rekap (Map dalam Lemari).
+     */
+    public function recapTypes(): HasMany
     {
-        return $this->hasMany(RecapColumn::class)->orderBy('order');
+        return $this->hasMany(RecapType::class);
     }
 
-    // public function recapRows(): HasMany
+    /**
+     * 2. JALAN PINTAS (Opsional tapi Berguna)
+     * Jika kamu ingin mengambil SEMUA data rekap dari semua jenis
+     * (misal: untuk menghitung total omzet proyek secara global).
+     * Kita pakai 'HasManyThrough' (Punya banyak melalui...).
+     */
+    public function allRecaps(): HasManyThrough
+    {
+        return $this->hasManyThrough(Recap::class, RecapType::class);
+    }
+
+    // ============================================================
+    // ⚠️ HUBUNGAN LAMA (NONAKTIFKAN)
+    // Kita matikan supaya kodingan lama tidak salah ambil jalur.
+    // ============================================================
+
+    // public function recaps(): HasMany
     // {
-    //     return $this->hasMany(RecapRow::class);
+    //     return $this->hasMany(Recap::class);
     // }
 
- 
+    // public function recapColumns(): HasMany
+    // {
+    //     return $this->hasMany(RecapColumn::class)->orderBy('order');
+    // }
 }

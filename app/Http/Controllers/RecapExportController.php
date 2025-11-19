@@ -14,13 +14,20 @@ class RecapExportController extends Controller
      */
     public function __invoke(Recap $record)
     {
-        // 1. Ambil Data
+        // 1. Ambil Data Rekap
         $recap = $record;
-        $project = $recap->project;
+        
+        // Load relasi 'recapType' agar kita bisa ambil kolomnya
+        $recap->load('recapType');
 
-        // 2. Ambil Struktur Kolom (Sama seperti logic di RelationManager)
-        // Kita butuh tahu kolom mana saja yang harus ditampilkan
-        $columns = $project->recapColumns()
+        // Ambil Project (sekarang lewat jalur RecapType)
+        // Pastikan model RecapType punya relasi public function project()
+        $project = $recap->recapType->project; 
+
+        // 2. Ambil Struktur Kolom (DIPERBAIKI)
+        // DULU: $project->recapColumns() -> Error karena sudah dihapus
+        // SEKARANG: Ambil dari $recap->recapType->recapColumns()
+        $columns = $recap->recapType->recapColumns()
             ->where('type', '!=', 'group')
             ->orderBy('order')
             ->get();
@@ -29,16 +36,16 @@ class RecapExportController extends Controller
         $rows = $recap->recapRows()->get();
 
         // 4. Generate PDF
-        // Kita load view 'pdf.recap_report' (yang sudah kita buat sebelumnya)
+        // Menggunakan view 'pdf.recap_report' sesuai kode lama Anda
         $pdf = Pdf::loadView('pdf.recap_report', [
             'recap' => $recap,
             'columns' => $columns,
             'rows' => $rows,
-            'company' => $project->company ?? null, // Asumsi ada relasi ke company
-        ])->setPaper('a4', 'landscape'); // Landscape agar muat banyak kolom
+            'project' => $project, // Kirim variable project untuk Kop Surat
+            'company' => $project->company ?? null, 
+        ])->setPaper('a4', 'landscape'); 
 
-        // 5. STREAM PDF (Bukan Download)
-        // Ini kuncinya agar tampil di browser
+        // 5. STREAM PDF
         return $pdf->stream('Laporan-Rekap-' . Str::slug($recap->name) . '.pdf');
     }
 }

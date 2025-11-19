@@ -23,7 +23,12 @@ class RecapColumnsRelationManager extends RelationManager
 {
     protected static string $relationship = 'recapColumns';
     protected static ?string $title = '1. Desain Tabel Rekapitulasi';
-
+    
+    public function isReadOnly(): bool
+    {
+        return false;
+    }
+    
     public function form(Form $form): Form
     {
         return $form

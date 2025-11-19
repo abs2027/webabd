@@ -17,6 +17,11 @@ class RecapsRelationManager extends RelationManager
     protected static string $relationship = 'recaps';
     protected static ?string $title = '2. Periode Rekapitulasi';
 
+    public function isReadOnly(): bool
+    {
+        return false;
+    }
+
     public function form(Form $form): Form
     {
         return $form
@@ -44,14 +49,14 @@ class RecapsRelationManager extends RelationManager
             Tables\Actions\CreateAction::make(),
         ])
         ->actions([
-            // ▼▼▼ INI TOMBOL KUNCI-NYA ▼▼▼
-            // Tombol untuk "masuk" ke halaman input data
-            Tables\Actions\Action::make('Input Data')
-                ->url(fn (Recap $record): string => RecapResource::getUrl('edit', ['record' => $record]))
-                ->icon('heroicon-o-pencil-square'),
-
-            Tables\Actions\EditAction::make(),
-            Tables\Actions\DeleteAction::make(),
+                // Tombol Input Data
+                Tables\Actions\Action::make('Input Data')
+                    ->icon('heroicon-o-pencil-square')
+                    // ▼▼▼ UBAH KE VIEW ▼▼▼
+                    ->url(fn ($record): string => RecapResource::getUrl('view', ['record' => $record])), 
+                    
+                Tables\Actions\EditAction::make(),
+                Tables\Actions\DeleteAction::make(),
         ]);
     }
 }

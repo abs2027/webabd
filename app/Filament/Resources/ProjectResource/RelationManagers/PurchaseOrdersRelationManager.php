@@ -18,6 +18,11 @@ class PurchaseOrdersRelationManager extends RelationManager
 {
     protected static string $relationship = 'purchaseOrders';
     protected static ?string $title = 'Purchase Orders (PO)';
+
+    public function isReadOnly(): bool
+    {
+        return false;
+    }
     
 
     public function form(Form $form): Form
