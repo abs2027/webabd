@@ -7,7 +7,7 @@ use App\Filament\Resources\RecapResource\Widgets\RecapDistributionChart;
 use Filament\Actions;
 use Filament\Resources\Pages\ViewRecord;
 use App\Filament\Resources\RecapResource\Widgets\RecapTrendChart; 
-use App\Filament\Resources\RecapResource\Widgets\RecapStatsOverview; // Import Widget Baru
+use App\Filament\Resources\RecapResource\Widgets\RecapStatsOverview; 
 
 class ViewRecap extends ViewRecord
 {
@@ -18,16 +18,12 @@ class ViewRecap extends ViewRecord
         return 'Input Data Rekapitulasi';
     }
 
+    // Bagian ini dikosongkan agar tombol lama hilang
     protected function getHeaderActions(): array
     {
-        return [
-            Actions\EditAction::make()
-                ->label('Ubah Info Periode')
-                ->color('gray'),
-        ];
+        return [];
     }
 
-    // ▼▼▼ UPDATE BAGIAN INI ▼▼▼
     protected function getHeaderWidgets(): array
     {
         return [
@@ -36,7 +32,6 @@ class ViewRecap extends ViewRecord
             RecapDistributionChart::class, // baris 2 kolom 2
         ];
     }
-
 
     public function getHeaderWidgetsColumns(): int | array
     {

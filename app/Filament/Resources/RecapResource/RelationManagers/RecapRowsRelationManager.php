@@ -14,6 +14,7 @@ use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Select; 
 use Filament\Forms\Components\Section; 
+use Filament\Forms\Components\Placeholder; 
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Columns\Summarizers\Sum;
 use Filament\Forms\Get; 
@@ -21,6 +22,9 @@ use Filament\Forms\Set;
 use Illuminate\Support\Facades\DB; 
 use Filament\Tables\Actions\Action; 
 use Illuminate\Support\Str;
+use Illuminate\Support\HtmlString; 
+use Illuminate\Support\Arr; 
+use Filament\Notifications\Notification; // Import Notifikasi
 
 class RecapRowsRelationManager extends RelationManager
 {
@@ -32,16 +36,117 @@ class RecapRowsRelationManager extends RelationManager
         return false;
     }
 
+    // ▼▼▼ FUNGSI BARU: COPY DARI HISTORY ▼▼▼
+    public function copyFromHistory($rowId)
+    {
+        // 1. Cari data berdasarkan ID
+        $record = $this->getOwnerRecord()->recapRows()->find($rowId);
+        
+        if (!$record) {
+            Notification::make()->title('Data tidak ditemukan')->danger()->send();
+            return;
+        }
+
+        // 2. Isi Form yang sedang aktif (Mounted Form)
+        // Kita bungkus dengan key 'data' karena skema form kita menggunakan prefix 'data.'
+        $this->getMountedTableActionForm()->fill([
+            'data' => $record->data
+        ]);
+
+        // 3. Beri notifikasi sukses
+        Notification::make()
+            ->title('Data disalin dari riwayat!')
+            ->success()
+            ->duration(2000)
+            ->send();
+    }
+    // ▲▲▲ SELESAI FUNGSI BARU ▲▲▲
+
     public function form(Form $form): Form
     {
-        return $form
-            ->schema(function (): array {
-                $recap = $this->getOwnerRecord();
-                if (!$recap || !$recap->recapType) return [];
-                $recapType = $recap->recapType;
-                $parentColumns = $recapType->recapColumns()->whereNull('parent_id')->orderBy('order')->get();
-                return $this->buildSchema($parentColumns, 'data'); 
+        $recap = $this->getOwnerRecord();
+        
+        if (!$recap || !$recap->recapType) {
+            return $form->schema([]);
+        }
+        
+        $recapType = $recap->recapType;
+        $parentColumns = $recapType->recapColumns()->whereNull('parent_id')->orderBy('order')->get();
+        
+        // 1. Generate Form Input Asli
+        $formFields = $this->buildSchema($parentColumns, 'data'); 
+
+        // ▼▼▼ LOGIKA KONTEN CONTEKAN ▼▼▼
+        $cheatSheetTop = Placeholder::make('latest_data_preview_top')
+            ->label('Riwayat Input Data (Klik baris untuk menyalin)') // Update Label
+            ->columnSpanFull()
+            ->visible(fn ($operation) => $operation === 'create')
+            ->content(function () use ($recap, $recapType) {
+                $previewColumns = $recapType->recapColumns()
+                    ->where('type', '!=', 'group')
+                    ->orderBy('order')
+                    ->get();
+
+                // Ambil 5 data terakhir & balik urutan
+                $latestRows = $recap->recapRows()->latest()->take(5)->get()->reverse();
+
+                if ($latestRows->isEmpty()) {
+                    return new HtmlString('<div class="text-xs text-gray-500 italic">Belum ada data masuk.</div>');
+                }
+
+                $headerHtml = '';
+                foreach ($previewColumns as $col) {
+                    $headerHtml .= "<th class='px-3 py-2 text-left whitespace-nowrap bg-gray-50 dark:bg-gray-800 border-b dark:border-gray-700 sticky top-0 z-10'>{$col->name}</th>";
+                }
+
+                $rowsHtml = '';
+                foreach ($latestRows as $row) {
+                    $tds = '';
+                    foreach ($previewColumns as $col) {
+                        $flatData = Arr::dot($row->data ?? []);
+                        $value = '-';
+                        foreach ($flatData as $k => $v) {
+                            if (str_ends_with($k, $col->name)) {
+                                $value = $v;
+                                if ($col->type == 'money') $value = number_format((float)str_replace(['.',','],['','.'],$value), 0, ',', '.');
+                                break;
+                            }
+                        }
+                        $tds .= "<td class='px-3 py-1 border-b border-gray-200 dark:border-gray-700 whitespace-nowrap'>{$value}</td>";
+                    }
+                    
+                    // ▼▼▼ TAMBAHKAN wire:click DAN CURSOR POINTER DI SINI ▼▼▼
+                    $rowsHtml .= "
+                        <tr 
+                            wire:click=\"copyFromHistory('{$row->id}')\" 
+                            class='text-xs hover:bg-blue-50 dark:hover:bg-gray-700 transition-colors cursor-pointer group'
+                            title='Klik untuk menyalin data baris ini'
+                        >
+                            {$tds}
+                        </tr>
+                    ";
+                }
+
+                return new HtmlString("
+                    <div class='overflow-auto max-h-44 rounded border border-gray-200 dark:border-gray-700 mb-4 shadow-sm scrollbar-thin'>
+                        <table class='w-full text-xs text-gray-600 dark:text-gray-400 border-collapse'>
+                            <thead class='font-bold text-gray-700 dark:text-gray-200'>
+                                <tr>{$headerHtml}</tr>
+                            </thead>
+                            <tbody>
+                                {$rowsHtml}
+                            </tbody>
+                        </table>
+                        <div class='text-[10px] text-gray-400 text-center py-1 italic bg-gray-50 dark:bg-gray-800 border-t dark:border-gray-700'>
+                            * Tips: Klik salah satu baris di atas untuk menyalin isinya ke form input.
+                        </div>
+                    </div>
+                ");
             });
+        
+        array_unshift($formFields, $cheatSheetTop);
+
+        return $form->schema($formFields);
     }
 
     protected function buildSchema(iterable $columns, string $baseKey): array
@@ -208,9 +313,7 @@ class RecapRowsRelationManager extends RelationManager
             ->columns($tableColumns)
             ->filters($filters)
             // ▼▼▼ 1. PENGATURAN LAYOUT FILTER ▼▼▼
-            // Ubah jadi 2 kolom agar tidak memanjang ke bawah
             ->filtersFormColumns(2) 
-            // Perlebar popup filternya agar muat 2 kolom (Width: 4xl)
             ->filtersFormWidth('4xl')
             
             ->headerActions([
@@ -256,7 +359,8 @@ class RecapRowsRelationManager extends RelationManager
                     ->url(fn ($livewire) => route('recap.print', ['record' => $livewire->getOwnerRecord()]))
                     ->openUrlInNewTab(),
                 
-                Tables\Actions\CreateAction::make(),
+                Tables\Actions\CreateAction::make()
+                    ->label('Submit Rekapitulasi'),
             ])
             ->toggleColumnsTriggerAction(
                 fn (Action $action) => $action

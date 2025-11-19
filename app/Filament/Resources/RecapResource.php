@@ -12,6 +12,7 @@ use Filament\Tables;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Filament\Forms\Components\Section; // Import Section
+use Filament\Forms\Components\Actions\Action; // ▼▼▼ PENTING: Import Action Form ▼▼▼
 use Filament\Facades\Filament; // Import Filament Facade
 
 class RecapResource extends Resource
@@ -37,8 +38,22 @@ class RecapResource extends Resource
     {
         return $form
             ->schema([
-                // ▼▼▼ 3. BUNGKUS DALAM SECTION COLLAPSIBLE ▼▼▼
+                // ▼▼▼ 3. BUNGKUS DALAM SECTION COLLAPSIBLE + HEADER ACTION ▼▼▼
                 Section::make('Informasi Periode')
+                    ->description('Detail periode rekapitulasi') // Opsional: Deskripsi kecil
+                    ->headerActions([
+                        // ▼▼▼ TOMBOL EDIT DISISIPKAN DI SINI ▼▼▼
+                        Action::make('edit_info')
+                            ->label('Ubah Info')
+                            ->icon('heroicon-m-pencil-square')
+                            ->button()
+                            ->size('sm')
+                            ->color('gray')
+                            // Arahkan ke halaman Edit
+                            ->url(fn ($record) => self::getUrl('edit', ['record' => $record]))
+                            // Sembunyikan tombol jika user SUDAH di halaman edit
+                            ->hidden(fn ($operation) => $operation === 'edit'),
+                    ])
                     ->schema([
                         Forms\Components\TextInput::make('name')
                             ->label('Nama Periode')
