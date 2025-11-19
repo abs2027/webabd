@@ -11,7 +11,8 @@
         "filament/filament": "^3.2",
         "laravel/framework": "^12.0",
         "laravel/tinker": "^2.10.1",
-        "riskihajar/terbilang": "^2.0"
+        "riskihajar/terbilang": "^2.0",
+        "simplesoftwareio/simple-qrcode": "^4.2"
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",

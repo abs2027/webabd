@@ -14,15 +14,36 @@
         .watermark {
             position: fixed;
             top: 35%;
-            left: 25%; /* Posisikan di tengah */
+            left: 25%; 
             width: 50%;
-            z-index: -1000; /* Taruh di paling belakang */
-            opacity: 0.1; /* SANGAT PUDAR (10%) agar tidak mengganggu tulisan */
-            transform: rotate(-30deg); /* Miring sedikit biar keren */
+            z-index: -1000; 
+            opacity: 0.1; 
+            transform: rotate(-30deg); 
         }
         .watermark img {
             width: 100%;
             height: auto;
+        }
+
+        /* UPDATE POSISI QR CODE: GUNAKAN NILAI NEGATIF */
+        .qr-code-container {
+            position: fixed;
+            /* Masukkan ke area margin bawah (karena margin bawah 1cm/~37px) */
+            bottom: -10px;    
+            /* Geser jauh ke kanan masuk ke margin kanan (karena margin kanan 2cm/~75px) */
+            right: -65px;      
+            text-align: center;
+            z-index: 100;
+        }
+        .qr-code-img {
+            width: 50px;  /* Diperkecil sedikit lagi biar rapi */
+            height: 50px;
+        }
+        .qr-label {
+            font-size: 5pt;
+            margin-top: 2px;
+            color: #555;
+            font-weight: bold;
         }
 
         /* STYLE LAINNYA TETAP SAMA */
@@ -38,7 +59,7 @@
             padding: 10px;
             min-height: 200px; 
             margin-bottom: 10px;
-            background-color: transparent; /* Pastikan transparan agar watermark terlihat */
+            background-color: transparent; 
         }
         .dotted-line {
             border-bottom: 1px dotted #999;
@@ -81,14 +102,10 @@
 </head>
 <body>
 
-    <!-- ========================================== -->
-    <!-- 3. LOGO WATERMARK (DITENGAH HALAMAN)     -->
-    <!-- ========================================== -->
+    <!-- 3. LOGO WATERMARK -->
     @php
-        // Ambil path logo (copas logika dari komponen letterhead)
         $logoPath = null;
         if ($project->company && $project->company->logo_path) {
-            // Pastikan file ada di storage
             if (\Illuminate\Support\Facades\Storage::disk('public')->exists($project->company->logo_path)) {
                 $logoPath = storage_path('app/public/' . $project->company->logo_path);
             }
@@ -101,15 +118,22 @@
         </div>
     @endif
 
-    <!-- KOP SURAT (Di atas watermark) -->
+    <!-- QR CODE VALIDASI -->
+    @if(isset($qrCode))
+    <div class="qr-code-container">
+        <img src="data:image/svg+xml;base64,{{ $qrCode }}" class="qr-code-img" alt="QR Validation">
+        <div class="qr-label">Scan Validasi</div>
+    </div>
+    @endif
+
+    <!-- KOP SURAT -->
     @if($project->company)
         <x-pdf.letterhead :company="$project->company" />
     @endif
 
     <!-- JUDUL -->
     <div class="title-container">
-        <!-- PERUBAHAN DI SINI: Ganti Judul Jadi BERITA ACARA / MINUTES OF MEETING -->
-        <div class="title">MINUTES OF MEETING</div>
+        <div class="title">BERITA ACARA / MINUTES OF MEETING</div>
         <div class="subtitle">Nomor: .................................................</div>
     </div>
 
@@ -142,7 +166,7 @@
     <!-- AREA TULIS TANGAN -->
     <div class="handwriting-area">
         <div class="instruction">(Tulis rincian hasil meeting di sini)</div>
-        @for($i=0; $i<15; $i++)
+        @for($i=0; $i<8; $i++)
             <div class="dotted-line"></div>
         @endfor
     </div>

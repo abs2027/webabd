@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AddendumPrintController;
+use App\Http\Controllers\DocumentValidationController;
 use App\Http\Controllers\RecapExportController;
 use Illuminate\Support\Facades\Route;
 use App\Models\DeliveryOrder;
@@ -97,3 +98,4 @@ Route::get('/{tenant}/invoices/{record}/print-receipt', function ($tenant, Invoi
 
 Route::get('/recap/{record}/print', RecapExportController::class)->name('recap.print');
 Route::get('/addendum/{record}/print', AddendumPrintController::class)->name('addendum.print');
+Route::get('/validate/addendum/{id}', [DocumentValidationController::class, 'checkAddendum'])->name('validation.addendum');
