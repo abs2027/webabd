@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\RecapResource\Pages;
 
 use App\Filament\Resources\RecapResource;
+use App\Filament\Resources\RecapResource\Widgets\RecapCostByLocationChart;
 use App\Filament\Resources\RecapTypeResource;
 use Filament\Actions;
 use Filament\Resources\Pages\ViewRecord;
@@ -19,7 +20,7 @@ class ViewRecap extends ViewRecord
 
     public function getTitle(): string | Htmlable
     {
-        return 'Dashboard ' . $this->getRecord()->name;
+        return 'Dashboard  - ' . $this->getRecord()->name;
     }
 
     // ▼▼▼ PERBAIKAN: Hapus Action Edit di Header (Return array kosong) ▼▼▼
@@ -34,8 +35,10 @@ class ViewRecap extends ViewRecord
     {
         return [
             RecapStatsOverview::class,      
-            RecapTrendChart::class,         
-            RecapDistributionChart::class,  
+             
+            RecapCostByLocationChart::class,      
+            RecapDistributionChart::class,
+             RecapTrendChart::class,   
         ];
     }
 

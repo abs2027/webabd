@@ -5,52 +5,37 @@ namespace App\Filament\Resources\RecapResource\Widgets;
 use Filament\Widgets\ChartWidget;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Str;
 
 class RecapDistributionChart extends ChartWidget
 {
-    protected static ?string $heading = 'Proporsi Kategori';
+    protected static ?string $heading = 'Frekuensi Data';
     protected static ?string $maxHeight = '300px';
     
     public ?Model $record = null;
-
-    // Properti bawaan Filament untuk menyimpan pilihan Filter
     public ?string $filter = null; 
 
-    // ▼▼▼ BAGIAN BARU: ISI FILTER DENGAN KOLOM TIPE 'SELECT' ▼▼▼
+    // 1. FILTER HANYA KOLOM KATEGORI (DIMENSION)
     protected function getFilters(): ?array
     {
         if (!$this->record) return [];
 
-        // Ambil semua kolom yang tipenya 'select' (Pilihan/Dropdown)
-        // Karena grafik Proporsi/Distribusi hanya masuk akal untuk data Kategori
         return $this->record->recapType->recapColumns()
-            ->where('type', 'select')
+            ->where('role', 'dimension') // Hanya ambil yang role-nya Dimension
             ->orderBy('order')
-            ->pluck('name', 'name') // Key=Nama, Label=Nama
+            ->pluck('name', 'name')
             ->toArray();
     }
 
-    // Konfigurasi Bar Chart (Horizontal)
+    // Konfigurasi Bar Chart Horizontal
     protected static ?array $options = [
         'indexAxis' => 'y', 
         'plugins' => [
-            'legend' => [
-                'display' => false, 
-            ],
+            'legend' => ['display' => false],
         ],
         'scales' => [
-            'x' => [
-                'display' => true, 
-                'grid' => [
-                    'display' => false,
-                ],
-            ],
-            'y' => [
-                'display' => true, 
-                'grid' => [
-                    'display' => false,
-                ],
-            ],
+            'x' => ['display' => true, 'grid' => ['display' => false]],
+            'y' => ['display' => true, 'grid' => ['display' => false]],
         ],
         'maintainAspectRatio' => false,
     ];
@@ -62,18 +47,15 @@ class RecapDistributionChart extends ChartWidget
         }
 
         $recap = $this->record;
-        $recap->load('recapType');
         $recapType = $recap->recapType;
 
-        // ▼▼▼ LOGIKA DINAMIS SEPERTI TREND CHART ▼▼▼
-        
-        // 1. Cek apakah ada Filter yang dipilih User
+        // 2. TENTUKAN KATEGORI
         $targetName = $this->filter;
 
-        // 2. Jika kosong (awal buka), ambil kolom 'select' pertama
+        // Jika kosong, ambil dimension pertama
         if (!$targetName) {
             $firstCol = $recapType->recapColumns()
-                ->where('type', 'select')
+                ->where('role', 'dimension')
                 ->orderBy('order')
                 ->first();
             
@@ -84,10 +66,9 @@ class RecapDistributionChart extends ChartWidget
             return ['datasets' => [], 'labels' => []];
         }
         
-        // Update Judul agar user tahu sedang lihat data apa
-        self::$heading = 'Proporsi: ' . $targetName;
+        self::$heading = 'Frekuensi: ' . $targetName;
 
-        // 3. Hitung Data berdasarkan Nama Kolom yang dipilih
+        // 3. HITUNG JUMLAH KEMUNCULAN (COUNT)
         $rows = $recap->recapRows()->get();
         $distribution = [];
 
@@ -96,14 +77,14 @@ class RecapDistributionChart extends ChartWidget
             $flatData = Arr::dot($dataJSON);
             
             foreach ($flatData as $key => $val) {
-                // Cek apakah key JSON berakhiran dengan nama kolom target
-                if (str_ends_with($key, $targetName)) {
-                    $label = $val ?: 'Tidak Ada Data'; // Handle jika kosong
+                // Cek apakah key mengandung nama kolom target
+                if (Str::endsWith(strtolower($key), strtolower($targetName))) {
+                    $label = $val ?: 'Tanpa Nama';
                     
                     if (!isset($distribution[$label])) {
                         $distribution[$label] = 0;
                     }
-                    $distribution[$label]++; 
+                    $distribution[$label]++; // Hitung +1 (Frekuensi)
                     break;
                 }
             }
@@ -115,7 +96,7 @@ class RecapDistributionChart extends ChartWidget
         return [
             'datasets' => [
                 [
-                    'label' => 'Jumlah',
+                    'label' => 'Jumlah Baris Data',
                     'data' => $dataPoints,
                     'backgroundColor' => '#3b82f6', 
                     'borderColor' => '#3b82f6',

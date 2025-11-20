@@ -6,6 +6,7 @@ use Filament\Widgets\StatsOverviewWidget as BaseWidget;
 use Filament\Widgets\StatsOverviewWidget\Stat;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Str;
 use Carbon\Carbon;
 
 class RecapStatsOverview extends BaseWidget
@@ -23,16 +24,17 @@ class RecapStatsOverview extends BaseWidget
         $recap = $this->record;
         $recap->load('recapType');
         
+        // ▼▼▼ 1. UPDATE: AMBIL BERDASARKAN ROLE 'METRIC_SUM' ▼▼▼
         $targetColumns = $recap->recapType->recapColumns()
-            ->whereIn('type', ['number', 'money'])
-            ->where('is_summarized', true)
+            ->where('role', 'metric_sum') // Hanya ambil yang jabatannya Nilai Utama
             ->orderBy('order')
             ->get();
+        // ▲▲▲ SELESAI UPDATE ▲▲▲
 
         $rows = $recap->recapRows()->get();
         $stats = []; 
 
-        // --- LOGIKA PROGRESS WAKTU (DIPERBAIKI) ---
+        // --- A. LOGIKA PROGRESS WAKTU (TETAP SAMA / SUDAH BAGUS) ---
         $start = $recap->start_date ? Carbon::parse($recap->start_date)->startOfDay() : null;
         $end = $recap->end_date ? Carbon::parse($recap->end_date)->endOfDay() : null;
         $now = Carbon::now();
@@ -53,15 +55,10 @@ class RecapStatsOverview extends BaseWidget
                 $color = 'danger'; 
                 $chart = [100, 100, 100, 100];
             } else {
-                // Hitung hari berjalan
                 $daysPassed = $start->diffInDays($now) + 1;
-                
-                // ▼▼▼ PERBAIKAN DI SINI: Pakai round() biar gak ada koma ▼▼▼
                 $remainingDays = round($now->diffInDays($end)); 
-                // ▲▲▲ SELESAI ▲▲▲
 
                 $percent = min(100, round(($daysPassed / $totalDays) * 100));
-                
                 $desc = "Sisa {$remainingDays} hari lagi";
                 
                 if ($percent > 90) $color = 'danger'; 
@@ -87,7 +84,7 @@ class RecapStatsOverview extends BaseWidget
                 ->color('gray');
         }
 
-        // --- LOGIKA STATISTIK LAINNYA (TIDAK BERUBAH) ---
+        // --- B. LOGIKA STATISTIK METRIK (DIPERBARUI AGAR LEBIH PINTAR) ---
         foreach ($targetColumns as $column) {
             $totalValue = 0;
             $chartData = []; 
@@ -96,19 +93,25 @@ class RecapStatsOverview extends BaseWidget
                 $dataJSON = $row->data;
                 $flatData = Arr::dot($dataJSON);
                 $foundValue = 0; 
+
                 foreach ($flatData as $key => $val) {
-                    if (str_ends_with($key, $column->name)) {
-                        $cleanVal = str_replace(['Rp', '.', ' '], '', $val);
+                    // Cek apakah key JSON berakhiran dengan nama kolom target
+                    if (Str::endsWith(strtolower($key), strtolower($column->name))) {
+                        $cleanVal = str_replace(['Rp', 'IDR', '.', ' '], '', $val);
                         $cleanVal = str_replace(',', '.', $cleanVal);
-                        $foundValue = (float) $cleanVal;
+                        if (is_numeric($cleanVal)) {
+                            $foundValue = (float) $cleanVal;
+                        }
                         break; 
                     }
                 }
+
                 $totalValue += $foundValue;
                 $chartData[] = $foundValue; 
             }
 
-            if ($column->type === 'money') {
+            // Format Tampilan
+            if ($column->type === 'money' || Str::contains(strtolower($column->name), ['harga', 'biaya', 'total', 'rp'])) {
                 $formattedTotal = 'Rp ' . number_format($totalValue, 0, ',', '.');
                 $icon = 'heroicon-m-banknotes';
             } else {

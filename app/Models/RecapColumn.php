@@ -16,18 +16,20 @@ class RecapColumn extends Model
         'parent_id',
         'name',
         'type',
+        
+        // ▼▼▼ UPDATE: Menambahkan 'role' agar bisa disimpan ▼▼▼
+        'role', 
+        
         'options',
         'order',
         'operand_a',
         'operator',
         'operand_b',
         'is_summarized',
-        // 'is_duplicate_check', <--- SUDAH DIHAPUS
     ];
 
     protected $casts = [
         'is_summarized' => 'boolean',
-        // 'is_duplicate_check' => 'boolean', <--- SUDAH DIHAPUS
         'options' => 'array',
     ];
 
