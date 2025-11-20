@@ -3,10 +3,10 @@
 namespace App\Filament\Resources\RecapResource\Pages;
 
 use App\Filament\Resources\RecapResource;
+use App\Filament\Resources\RecapTypeResource; 
 use Filament\Actions;
+use Filament\Actions\DeleteAction;
 use Filament\Resources\Pages\EditRecord;
-use App\Filament\Resources\ProjectResource; // <-- Import
-use Filament\Notifications\Notification; // <-- Import
 
 class EditRecap extends EditRecord
 {
@@ -14,45 +14,32 @@ class EditRecap extends EditRecord
 
     protected function getHeaderActions(): array
     {
-        // Tombol Hapus Kustom kita (ini sudah benar)
         return [
-            Actions\Action::make('delete')
-                ->label('Hapus')
-                ->color('danger')
-                ->icon('heroicon-o-trash')
-                ->requiresConfirmation()
-                ->action(function () {
-                    $record = $this->record;
-                    $projectId = $record->project_id;
-                    $record->delete();
-                    Notification::make()
-                        ->title('Data periode berhasil dihapus')
-                        ->success()
-                        ->send();
-                    $this->redirect(ProjectResource::getUrl('edit', ['record' => $projectId]));
+            // ▼▼▼ PERBAIKAN UTAMA DI SINI ▼▼▼
+            DeleteAction::make()
+                // Kita wajib set redirect manual karena halaman index sudah tidak ada
+                ->successRedirectUrl(function ($record) {
+                    // Balik ke halaman Induk (Detail Jenis Rekap) setelah dihapus
+                    return RecapTypeResource::getUrl('view', ['record' => $record->recapType]);
                 }),
+            // ▲▲▲ SELESAI PERBAIKAN ▲▲▲
         ];
     }
 
-    // ▼▼▼ INI PERBAIKAN BARUNYA ▼▼▼
-    // Fungsi ini akan mengganti breadcrumb 'Recap > Ubah'
     public function getBreadcrumbs(): array
     {
-        // Ambil data Recap ('Periode November')
-        $record = $this->record;
-        // Ambil data Project induknya
-        $project = $record->project;
+        $record = $this->getRecord();
+        $record->load('recapType');
 
         return [
-            // Link ke halaman daftar Proyek
-            ProjectResource::getUrl('index') => 'Proyek',
-            
-            // Link ke halaman 'edit' Proyek induk
-            ProjectResource::getUrl('edit', ['record' => $project->id]) => $project->name,
-            
-            // Teks untuk halaman ini (tidak bisa diklik)
-            'Input Data Rekapitulasi',
+            RecapTypeResource::getUrl('view', ['record' => $record->recapType]) => $record->recapType->name,
+            $this->getResource()::getUrl('view', ['record' => $record]) => $record->name,
+            'edit' => 'Ubah Info',
         ];
     }
-    // ▲▲▲ SELESAI ▲▲▲
+
+    protected function getRedirectUrl(): string
+    {
+        return $this->getResource()::getUrl('view', ['record' => $this->getRecord()]);
+    }
 }

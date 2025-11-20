@@ -16,6 +16,7 @@ use Filament\Forms\Components\Section;
 use Filament\Forms\Components\Placeholder; 
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Columns\Summarizers\Sum;
+use Filament\Tables\Grouping\Group; 
 use Filament\Forms\Get; 
 use Filament\Forms\Set; 
 use Illuminate\Support\Facades\DB; 
@@ -26,18 +27,23 @@ use Illuminate\Support\HtmlString;
 use Illuminate\Support\Arr; 
 use Filament\Notifications\Notification;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Database\Eloquent\Builder; 
+use Illuminate\Database\Eloquent\Model; 
 
 class RecapRowsRelationManager extends RelationManager
 {
     protected static string $relationship = 'recapRows';
-    protected static ?string $title = '2. Data Rekapitulasi';
+
+    public static function getTitle(Model $ownerRecord, string $pageClass): string
+    {
+        return 'Detail Rekapitulasi - ' . $ownerRecord->name;
+    }
 
     public function isReadOnly(): bool
     {
         return false;
     }
     
-    // ... (Fungsi copyFromHistory dan form SAMA SEPERTI SEBELUMNYA, tidak berubah) ...
     public function copyFromHistory($rowId)
     {
         $record = $this->getOwnerRecord()->recapRows()->find($rowId);
@@ -107,7 +113,6 @@ class RecapRowsRelationManager extends RelationManager
 
     protected function buildSchema(iterable $columns, string $baseKey): array
     {
-        // ... (Fungsi buildSchema SAMA SEPERTI SEBELUMNYA, update logic visibility saja) ...
         $schema = [];
         foreach ($columns as $column) {
             $children = $column->children()->orderBy('order')->get();
@@ -127,7 +132,23 @@ class RecapRowsRelationManager extends RelationManager
                         break;
                     case 'number': $field = TextInput::make($currentKey)->numeric(); break;
                     case 'money': $field = TextInput::make($currentKey)->numeric()->prefix('Rp'); break;
-                    case 'date': $field = DatePicker::make($currentKey); break;
+                    
+                    case 'date': 
+                        $field = DatePicker::make($currentKey)
+                            ->native(false) 
+                            ->minDate(fn () => $this->getOwnerRecord()->start_date)
+                            ->maxDate(fn () => $this->getOwnerRecord()->end_date)
+                            ->validationMessages([
+                                'after_or_equal' => 'Tanggal tidak boleh mendahului Tanggal Mulai Periode.',
+                                'before_or_equal' => 'Tanggal tidak boleh melebihi Tanggal Selesai Periode.',
+                            ])
+                            ->helperText(function () {
+                                $start = $this->getOwnerRecord()->start_date?->format('d M');
+                                $end = $this->getOwnerRecord()->end_date?->format('d M');
+                                return $start && $end ? "Pilih tanggal antara $start - $end" : null;
+                            });
+                        break;
+
                     case 'file': $field = FileUpload::make($currentKey)->directory('recap-data-files')->disk('public'); break;
                 }
                 if (in_array($column->type, ['number', 'money', 'select'])) {
@@ -182,6 +203,38 @@ class RecapRowsRelationManager extends RelationManager
         $recapType = $recap->recapType;
         $dataColumns = $recapType->recapColumns()->where('type', '!=', 'group')->orderBy('order')->get();
 
+        $groups = [];
+        $groupCandidates = $recapType->recapColumns()
+            ->whereIn('type', ['select', 'date'])
+            ->orderBy('order')
+            ->get();
+
+        foreach ($groupCandidates as $col) {
+            $path = []; 
+            $tempCol = $col;
+            while ($tempCol != null) { 
+                array_unshift($path, $tempCol->name); 
+                $tempCol = $tempCol->parent; 
+            }
+            $quotedPathStr = collect($path)->map(fn($s) => '"' . $s . '"')->join('.');
+            $jsonPath = "data->'$." . $quotedPathStr . "'";
+            $dotPath = implode('.', $path);
+
+            $groups[] = Group::make('group_col_' . $col->id)
+                ->label($col->name)
+                ->getTitleFromRecordUsing(function ($record) use ($dotPath) {
+                    return Arr::get($record->data, $dotPath) ?? '-';
+                })
+                ->scopeQueryUsing(function (Builder $query) use ($jsonPath) {
+                    return $query->orderByRaw("JSON_UNQUOTE($jsonPath)");
+                })
+                ->orderQueryUsing(function (Builder $query, ?string $direction = 'asc') use ($jsonPath) {
+                    $direction = $direction ?? 'asc';
+                    $query->orderByRaw("JSON_UNQUOTE($jsonPath) $direction");
+                })
+                ->collapsible();
+        }
+
         $tableColumns = [];
         foreach ($dataColumns as $column) {
             $key = 'data.';
@@ -234,26 +287,21 @@ class RecapRowsRelationManager extends RelationManager
                      }
                      break;
                 
-                // ▼▼▼ UPDATE: Handle Dropdown (Select) biar bisa di-SUM ▼▼▼
                 case 'select':
                     $tableColumn = TextColumn::make($key)->label($column->name);
-                    
                     if ($column->is_summarized) {
                         $tableColumn->summarize(
                             Sum::make()
                                 ->label(stripos($column->name, 'Total') === 0 ? $column->name : 'Total ' . $column->name)
                                 ->using(function ($query) use ($jsonPath) {
-                                    // Paksa isi JSON jadi DECIMAL biar bisa di-sum, meski aslinya String/Varchar
                                     return $query->sum(DB::raw("CAST(JSON_UNQUOTE($jsonPath) AS DECIMAL(15, 2))"));
                                 })
                         );
                     }
-                    // Searchable tetap ada buat dropdown
                     $tableColumn->searchable(query: function ($query, string $search) use ($jsonPath) {
                         $query->whereRaw("LOWER(JSON_UNQUOTE($jsonPath)) LIKE ?", ["%".strtolower($search)."%"]);
                     });
                     break;
-                // ▲▲▲ SELESAI UPDATE ▲▲▲
 
                 default:
                     $tableColumn = TextColumn::make($key)->label($column->name);
@@ -271,7 +319,6 @@ class RecapRowsRelationManager extends RelationManager
         foreach ($dataColumns as $column) {
             $path = []; $tempCol = $column;
             while ($tempCol != null) { array_unshift($path, $tempCol->name); $tempCol = $tempCol->parent; }
-            
             $quotedPath = collect($path)->map(fn($s) => '"' . $s . '"')->join('.');
             $jsonPath = "data->'$." . $quotedPath . "'";
 
@@ -294,25 +341,41 @@ class RecapRowsRelationManager extends RelationManager
             }
         }
 
-        // [BERSIH] TIDAK ADA EAGER LOADING SATPAM LAGI
         return $table
+            ->striped() 
+            ->groups($groups)
             ->columns($tableColumns)
             ->filters($filters)
             ->filtersFormColumns(2) 
             ->filtersFormWidth('4xl')
             
-            // [BERSIH] TIDAK ADA RECORD CLASSES (LOGIKA KUNING/SATPAM)
+            // ▼▼▼ UPDATE: Tambah Badge agar sejajar dengan Filter (0) ▼▼▼
+            ->toggleColumnsTriggerAction(
+                fn (Action $action) => $action
+                    ->button()
+                    ->label('Select') // Label tombol
+                    ->badge(count($this->toggledTableColumns)) // Hitung kolom yang disembunyikan
+                    ->icon('heroicon-o-adjustments-horizontal')
+                    ->extraAttributes(['class' => 'order-1']) 
+            )
+            // ▲▲▲ ▲▲▲
 
+            ->filtersTriggerAction(fn (Action $action) => $action->button()->label('Filter')->icon('heroicon-o-funnel')->extraAttributes(['class' => 'order-2']))
+            ->actions([Tables\Actions\EditAction::make(), Tables\Actions\DeleteAction::make()])
+            ->bulkActions([Tables\Actions\BulkActionGroup::make([Tables\Actions\DeleteBulkAction::make()])])
             ->headerActions([
-                ActionGroup::make([
-                    Action::make('download_template')
-                        ->label('1. Download Template CSV')
-                        ->icon('heroicon-o-arrow-down-tray')
-                        ->color('gray')
-                        ->action(function () use ($recap, $dataColumns) {
-                            $filename = 'Template-Input-' . Str::slug($recap->name) . '.csv';
-                            $headers = $dataColumns->pluck('name')->toArray();
+                Tables\Actions\CreateAction::make()
+                    ->label('Submit Rekapitulasi'),
 
+                ActionGroup::make([
+                    
+                    Action::make('download_template')
+                        ->label('Download Template')
+                        ->icon('heroicon-o-document-arrow-down')
+                        ->color('primary') 
+                        ->action(function () use ($recap, $dataColumns) {
+                            $filename = 'Template-' . Str::slug($recap->name) . '.csv';
+                            $headers = $dataColumns->pluck('name')->toArray();
                             return response()->streamDownload(function () use ($headers) {
                                 $file = fopen('php://output', 'w');
                                 fputcsv($file, $headers); 
@@ -321,22 +384,21 @@ class RecapRowsRelationManager extends RelationManager
                         }),
                     
                     Action::make('import_csv')
-                        ->label('2. Upload File CSV')
+                        ->label('Upload CSV')
                         ->icon('heroicon-o-arrow-up-tray')
                         ->color('primary')
                         ->form([
                             FileUpload::make('file')
-                                ->label('File CSV yang sudah diisi')
+                                ->label('File CSV')
                                 ->acceptedFileTypes(['text/csv', 'text/plain', 'application/vnd.ms-excel'])
                                 ->required()
-                                ->helperText('Pastikan menggunakan template yang sudah didownload. Data akan ditambahkan (Append).')
                         ])
                         ->action(function (array $data) use ($recap, $recapType) {
                             $path = Storage::disk('public')->path($data['file']);
                             $file = fopen($path, 'r');
                             $headers = fgetcsv($file);
                             if (!$headers) {
-                                Notification::make()->title('File CSV kosong / rusak')->danger()->send();
+                                Notification::make()->title('File CSV kosong')->danger()->send();
                                 return;
                             }
                             $allColumns = $recapType->recapColumns()->where('type', '!=', 'group')->get();
@@ -381,83 +443,53 @@ class RecapRowsRelationManager extends RelationManager
                                 }
                             }
                             fclose($file);
-                            Notification::make()->title("Sukses! {$importedCount} data berhasil ditambahkan.")->success()->send();
+                            Notification::make()->title("Sukses! {$importedCount} data diimport.")->success()->send();
                         }),
-                ])
-                ->label('Import Data')
-                ->icon('heroicon-o-arrow-up-on-square')
-                ->color('primary')
-                ->button(), 
-                Action::make('lapor_wa')
-                    ->label('Lapor WA')
-                    ->icon('heroicon-o-chat-bubble-left-right') 
-                    ->color('success')
-                    ->url(function () use ($recap, $dataColumns) {
-                        $text = "*Laporan Harian: {$recap->name}*\n";
-                        $text .= "--------------------------------\n";
-                        $totalData = $recap->recapRows()->count();
-                        $text .= "📝 Jml Data: {$totalData} Baris\n\n";
-                        foreach ($dataColumns as $col) {
-                            if ($col->is_summarized && in_array($col->type, ['number', 'money'])) {
-                                $path = []; $tempCol = $col;
-                                while ($tempCol != null) { array_unshift($path, $tempCol->name); $tempCol = $tempCol->parent; }
-                                $quotedPath = collect($path)->map(fn($s) => '"' . $s . '"')->join('.');
-                                $jsonPath = "data->'$." . $quotedPath . "'";
-                                $sum = $recap->recapRows()->sum(DB::raw("CAST(JSON_UNQUOTE($jsonPath) AS DECIMAL(15, 2))"));
-                                $formattedVal = number_format($sum, 0, ',', '.');
-                                if ($col->type === 'money') $formattedVal = "Rp " . $formattedVal;
-                                $text .= "💰 Total {$col->name}: {$formattedVal}\n";
-                            }
-                        }
-                        $text .= "\n_Laporan digenerate otomatis oleh sistem_ 😎";
-                        return 'https://wa.me/?text=' . urlencode($text);
-                    })
-                    ->openUrlInNewTab(),
-                Action::make('export')
-                    ->label('Export Excel')
-                    ->icon('heroicon-o-arrow-down-tray')
-                    ->color('gray') 
-                    ->action(function () use ($recap, $dataColumns) {
-                         $headers = $dataColumns->pluck('name')->toArray();
-                         array_unshift($headers, 'No'); 
-                         $rows = $recap->recapRows()->get(); 
-                         $callback = function () use ($headers, $rows, $dataColumns) {
-                             $file = fopen('php://output', 'w');
-                             fputcsv($file, $headers);
-                             foreach ($rows as $index => $row) {
-                                 $rowData = [ $index + 1 ];
-                                 foreach ($dataColumns as $col) {
-                                     $value = $row->data;
-                                     $tempCol = $col; $path = [];
-                                     while ($tempCol != null) { array_unshift($path, $tempCol->name); $tempCol = $tempCol->parent; }
-                                     foreach ($path as $key) { $value = $value[$key] ?? null; }
-                                     if (is_array($value)) $value = json_encode($value);
-                                     $rowData[] = $value;
+
+                    Action::make('export')
+                        ->label('Export Excel')
+                        ->icon('heroicon-o-arrow-down-tray')
+                        ->color('gray')
+                        ->action(function () use ($recap, $dataColumns) {
+                             $headers = $dataColumns->pluck('name')->toArray();
+                             array_unshift($headers, 'No'); 
+                             $rows = $recap->recapRows()->get(); 
+                             $callback = function () use ($headers, $rows, $dataColumns) {
+                                 $file = fopen('php://output', 'w');
+                                 fputcsv($file, $headers);
+                                 foreach ($rows as $index => $row) {
+                                     $rowData = [ $index + 1 ];
+                                     foreach ($dataColumns as $col) {
+                                         $value = $row->data;
+                                         $tempCol = $col; $path = [];
+                                         while ($tempCol != null) { array_unshift($path, $tempCol->name); $tempCol = $tempCol->parent; }
+                                         foreach ($path as $key) { $value = $value[$key] ?? null; }
+                                         if (is_array($value)) $value = json_encode($value);
+                                         $rowData[] = $value;
+                                     }
+                                     fputcsv($file, $rowData);
                                  }
-                                 fputcsv($file, $rowData);
-                             }
-                             fclose($file);
-                         };
-                         $filename = 'Rekap-' . Str::slug($recap->name) . '-' . now()->toDateString() . '.csv';
-                         return response()->stream($callback, 200, [
-                             'Content-Type' => 'text/csv; charset=UTF-8',
-                             'Content-Disposition' => "attachment; filename=\"{$filename}\"; filename*=UTF-8''" . rawurlencode($filename),
-                             'Pragma' => 'no-cache',
-                             'Cache-Control' => 'must-revalidate, post-check=0, pre-check=0',
-                             'Expires' => '0',
-                         ]);
-                    }),
-                Action::make('export_pdf')
-                    ->label('Print PDF') 
-                    ->icon('heroicon-o-printer') 
-                    ->color('danger')
-                    ->url(fn ($livewire) => route('recap.print', ['record' => $livewire->getOwnerRecord()]))
-                    ->openUrlInNewTab(),
-                Tables\Actions\CreateAction::make()->label('Submit Rekapitulasi'),
-            ])
-            ->toggleColumnsTriggerAction(fn (Action $action) => $action->button()->label('select')->icon('heroicon-o-adjustments-horizontal')->extraAttributes(['class' => 'order-1']))
-            ->filtersTriggerAction(fn (Action $action) => $action->button()->label('Filter')->icon('heroicon-o-funnel')->extraAttributes(['class' => 'order-2']))
-            ->actions([Tables\Actions\EditAction::make(), Tables\Actions\DeleteAction::make()])
-            ->bulkActions([Tables\Actions\BulkActionGroup::make([Tables\Actions\DeleteBulkAction::make()])]);
+                                 fclose($file);
+                             };
+                             $filename = 'Rekap-' . Str::slug($recap->name) . '.csv';
+                             return response()->stream($callback, 200, [
+                                 'Content-Type' => 'text/csv',
+                                 'Content-Disposition' => "attachment; filename=\"{$filename}\"",
+                             ]);
+                        }),
+
+                    Action::make('export_pdf')
+                        ->label('Print PDF') 
+                        ->icon('heroicon-o-printer') 
+                        ->color('danger')
+                        ->url(fn ($livewire) => route('recap.print', ['record' => $livewire->getOwnerRecord()]))
+                        ->openUrlInNewTab(),
+
+                ])
+                ->label('Aksi Lainnya')
+                ->icon('heroicon-m-ellipsis-vertical')
+                ->color('gray')         
+                ->button(),
+            ]);
     }
 }

@@ -11,24 +11,22 @@ use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
-use Filament\Forms\Components\Section; // Import Section
-use Filament\Forms\Components\Actions\Action; // ▼▼▼ PENTING: Import Action Form ▼▼▼
-use Filament\Facades\Filament; // Import Filament Facade
+use Filament\Forms\Components\Section;
+use Filament\Forms\Components\Actions\Action;
+use Filament\Facades\Filament;
 
 class RecapResource extends Resource
 {
     protected static ?string $model = Recap::class;
+    protected static ?string $modelLabel = 'Rekapitulasi'; 
+    protected static ?string $recordTitleAttribute = 'name'; 
 
     protected static ?string $navigationIcon = 'heroicon-o-rectangle-stack';
     protected static bool $shouldRegisterNavigation = false;
-
-    // ▼▼▼ 1. MATIKAN SCOPE OTOMATIS (Sama seperti RecapType) ▼▼▼
     protected static bool $isScopedToTenant = false;
 
-    // ▼▼▼ 2. GANTI DENGAN FILTER MANUAL (Agar Data Aman) ▼▼▼
     public static function getEloquentQuery(): Builder
     {
-        // Filter: Hanya tampilkan Recap yang RecapType -> Project-nya milik Company ini
         return parent::getEloquentQuery()->whereHas('recapType.project', function ($query) {
             $query->where('company_id', Filament::getTenant()->id);
         });
@@ -38,50 +36,21 @@ class RecapResource extends Resource
     {
         return $form
             ->schema([
-                // ▼▼▼ 3. BUNGKUS DALAM SECTION COLLAPSIBLE + HEADER ACTION ▼▼▼
-                Section::make('Informasi Periode')
-                    ->description('Detail periode rekapitulasi') // Opsional: Deskripsi kecil
-                    ->headerActions([
-                        // ▼▼▼ TOMBOL EDIT DISISIPKAN DI SINI ▼▼▼
-                        Action::make('edit_info')
-                            ->label('Ubah Info')
-                            ->icon('heroicon-m-pencil-square')
-                            ->button()
-                            ->size('sm')
-                            ->color('gray')
-                            // Arahkan ke halaman Edit
-                            ->url(fn ($record) => self::getUrl('edit', ['record' => $record]))
-                            // Sembunyikan tombol jika user SUDAH di halaman edit
-                            ->hidden(fn ($operation) => $operation === 'edit'),
-                    ])
-                    ->schema([
-                        Forms\Components\TextInput::make('name')
-                            ->label('Nama Periode')
-                            ->required(),
-                        Forms\Components\DatePicker::make('start_date')
-                            ->label('Tanggal Mulai'),
-                        Forms\Components\DatePicker::make('end_date')
-                            ->label('Tanggal Selesai'),
-                    ])
-                    ->columns(3)
-                    ->collapsible()
-                    // Tutup otomatis saat mode 'view' agar user fokus ke tabel data
-                    ->collapsed(fn (string $operation) => $operation === 'view'),
-                // ▲▲▲ SELESAI BUNGKUS ▲▲▲
+                // [BERSIH] Section "Informasi Periode" dihapus sesuai permintaan.
+                // Halaman Create akan kosong, tapi halaman View (Dashboard) jadi bersih.
+                
+                // Jika nanti Ndan butuh form ini lagi khusus untuk halaman Create,
+                // Kita bisa kembalikan dengan kondisi ->visible(fn ($operation) => $operation === 'create')
             ]);
     }
 
     public static function table(Table $table): Table
     {
         return $table
-            ->columns([
-                // Kita kosongkan karena list diakses lewat RelationManager
-            ])
-            ->filters([
-                //
-            ])
+            ->columns([])
+            ->filters([])
             ->actions([
-                Tables\Actions\EditAction::make(),
+                // Tables\Actions\EditAction::make(), // [HAPUS] Tombol Edit di tabel depan juga kita buang
             ])
             ->bulkActions([
                 Tables\Actions\BulkActionGroup::make([
@@ -100,13 +69,13 @@ class RecapResource extends Resource
     public static function getPages(): array
     {
         return [
-            'index' => Pages\ListRecaps::route('/'),
-            'create' => Pages\CreateRecap::route('/create'),
+            // 'index' => Pages\ListRecaps::route('/'), // Sudah dihapus sebelumnya
             
-            // ▼▼▼ 4. DAFTARKAN HALAMAN VIEW ▼▼▼
+            'create' => Pages\CreateRecap::route('/create'),
             'view' => Pages\ViewRecap::route('/{record}'),
             
-            'edit' => Pages\EditRecap::route('/{record}/edit'),
+            // [HAPUS] Halaman Edit dinonaktifkan
+            // 'edit' => Pages\EditRecap::route('/{record}/edit'),
         ];
     }
 }
