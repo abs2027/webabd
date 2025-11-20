@@ -7,13 +7,11 @@ use Filament\Forms\Form;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Tables;
 use Filament\Tables\Table;
-
-// IMPORT BARU
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea; 
 use Filament\Forms\Components\Fieldset;
-use Filament\Forms\Components\Toggle; // <-- IMPORT TOGGLE
+use Filament\Forms\Components\Toggle;
 use Filament\Forms\Get;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Grouping\Group;
@@ -72,14 +70,15 @@ class RecapColumnsRelationManager extends RelationManager
                     ->numeric()
                     ->default(0),
                 
-                // ▼▼▼ FITUR BARU: SUMMARY TOGGLE ▼▼▼
+                // [BERSIH] SAKLAR DUPLIKAT SUDAH HILANG DARI SINI
+
+                // ▼▼▼ UPDATE: Izinkan 'select' (Dropdown) punya fitur Sum ▼▼▼
                 Toggle::make('is_summarized')
                     ->label('Tampilkan Total (Sum) di Footer?')
                     ->inline(false)
-                    // Hanya muncul untuk kolom Angka atau Uang
-                    ->visible(fn (Get $get) => in_array($get('type'), ['number', 'money'])),
-                // ▲▲▲ SELESAI ▲▲▲
-
+                    // Logic Baru: Muncul untuk Angka, Uang, DAN Pilihan (Dropdown)
+                    ->visible(fn (Get $get) => in_array($get('type'), ['number', 'money', 'select'])),
+                
                 Textarea::make('options')
                     ->label('Opsi Pilihan (Pisahkan dengan Koma)')
                     ->placeholder('Contoh: Lokasi A, Lokasi B, Lokasi C')
@@ -105,7 +104,8 @@ class RecapColumnsRelationManager extends RelationManager
                             ->placeholder('Misal: Harga'),
                     ])
                     ->columns(3)
-                    ->visible(fn (Get $get) => in_array($get('type'), ['number', 'money'])), 
+                    // Logic Baru: Kalkulasi juga boleh buat Dropdown (misal harga paket)
+                    ->visible(fn (Get $get) => in_array($get('type'), ['number', 'money', 'select'])), 
                     
             ])->columns(2);
     }

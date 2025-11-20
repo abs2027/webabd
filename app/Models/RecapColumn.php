@@ -12,7 +12,7 @@ class RecapColumn extends Model
     use HasFactory;
 
     protected $fillable = [
-        'recap_type_id', // <-- DIGANTI: Dulu project_id
+        'recap_type_id',
         'parent_id',
         'name',
         'type',
@@ -21,38 +21,31 @@ class RecapColumn extends Model
         'operand_a',
         'operator',
         'operand_b',
-        'is_summarized'
+        'is_summarized',
+        // 'is_duplicate_check', <--- SUDAH DIHAPUS
     ];
 
-    /**
-     * Sekarang menginduk ke RecapType (Jenis Rekap), bukan langsung ke Project.
-     */
+    protected $casts = [
+        'is_summarized' => 'boolean',
+        // 'is_duplicate_check' => 'boolean', <--- SUDAH DIHAPUS
+        'options' => 'array',
+    ];
+
     public function recapType(): BelongsTo
     {
         return $this->belongsTo(RecapType::class);
     }
 
-    /**
-     * Helper Opsional:
-     * Jika di kodemu nanti ada yang memanggil $column->project,
-     * fungsi ini akan mencarikan project-nya lewat jalur RecapType.
-     * Jadi kodingan lama tidak error.
-     */
     public function getProjectAttribute()
     {
         return $this->recapType->project;
     }
-
-    // --- BAGIAN DI BAWAH INI TETAP SAMA ---
 
     public function parent(): BelongsTo
     {
         return $this->belongsTo(RecapColumn::class, 'parent_id');
     }
 
-    /**
-     * Mendapatkan semua turunan (children) dari kolom ini.
-     */
     public function children(): HasMany
     {
         return $this->hasMany(RecapColumn::class, 'parent_id');
