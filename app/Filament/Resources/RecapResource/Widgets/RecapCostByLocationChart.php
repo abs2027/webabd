@@ -10,6 +10,8 @@ use Illuminate\Support\Str;
 class RecapCostByLocationChart extends ChartWidget
 {
     protected static ?string $heading = 'Proporsi Biaya';
+    
+    // Atur Max Height agar tidak terlalu tinggi
     protected static ?string $maxHeight = '150px';
     
     public ?Model $record = null;
@@ -19,10 +21,11 @@ class RecapCostByLocationChart extends ChartWidget
     {
         if (!$this->record) return [];
 
-        // ▼▼▼ LOGIKA BARU: AMBIL BERDASARKAN ROLE 'DIMENSION' ▼▼▼
-        // Sistem sekarang hanya mengambil kolom yang Anda tandai sebagai "Kategori"
         return $this->record->recapType->recapColumns()
-            ->where('role', 'dimension') 
+            ->whereIn('type', ['select', 'text']) 
+            ->where('name', 'not like', '%Harga%')
+            ->where('name', 'not like', '%Total%')
+            ->where('name', 'not like', '%Amount%')
             ->orderBy('order')
             ->pluck('name', 'name')
             ->toArray();
@@ -33,26 +36,18 @@ class RecapCostByLocationChart extends ChartWidget
         if (!$this->record) return ['datasets' => [], 'labels' => []];
 
         $recap = $this->record;
-        $recapType = $recap->recapType;
         
-        // 1. CARI METRIK UANG (VALUE)
-        // Kita cari kolom yang Role-nya "Nilai (Sum)"
-        // Prioritaskan yang namanya mengandung "Harga" atau "Total" untuk widget Biaya ini
-        $moneyCol = $recapType->recapColumns()
-            ->where('role', 'metric_sum')
-            ->where(function($q) {
-                $q->where('name', 'like', '%Harga%')
-                  ->orWhere('name', 'like', '%Total%')
-                  ->orWhere('name', 'like', '%Biaya%')
-                  ->orWhere('type', 'money');
-            })
+        $moneyCol = $recap->recapType->recapColumns()
+            ->whereIn('type', ['money', 'number'])
+            ->where('is_summarized', true)
             ->first();
 
-        // Fallback: Jika tidak ada yang namanya "Harga", ambil metric_sum pertama apapun itu
         if (!$moneyCol) {
-             $moneyCol = $recapType->recapColumns()
-                ->where('role', 'metric_sum')
-                ->orderBy('order', 'desc') // Biasanya Total ada di paling bawah
+             $moneyCol = $recap->recapType->recapColumns()
+                ->where(function($q) {
+                    $q->where('name', 'like', '%Total%')
+                      ->orWhere('name', 'like', '%Harga%');
+                })
                 ->first();
         }
 
@@ -60,16 +55,31 @@ class RecapCostByLocationChart extends ChartWidget
             return ['datasets' => [], 'labels' => []];
         }
 
-        // 2. CARI KATEGORI (LABEL)
         $targetName = $this->filter;
+
+        if ($targetName && (str_contains($targetName, 'Harga') || str_contains($targetName, 'Total'))) {
+            $targetName = null;
+        }
         
         if (!$targetName) {
-            // Ambil kolom 'dimension' pertama (Contoh: Tempat / Shift)
-            $defaultCol = $recapType->recapColumns()
-                ->where('role', 'dimension')
-                ->orderBy('order')
+            $defaultCol = $recap->recapType->recapColumns()
+                ->where('name', 'Tempat') 
                 ->first();
             
+            if (!$defaultCol) {
+                $defaultCol = $recap->recapType->recapColumns()
+                    ->where('name', 'Shift') 
+                    ->first();
+            }
+
+            if (!$defaultCol) {
+                $defaultCol = $recap->recapType->recapColumns()
+                    ->whereIn('type', ['select', 'text'])
+                    ->where('name', 'not like', '%Harga%')
+                    ->where('name', 'not like', '%Total%')
+                    ->orderBy('order')
+                    ->first();
+            }
             $targetName = $defaultCol ? $defaultCol->name : null;
         }
 
@@ -77,9 +87,8 @@ class RecapCostByLocationChart extends ChartWidget
             return ['datasets' => [], 'labels' => []];
         }
 
-        self::$heading = "Proporsi " . $moneyCol->name . " per " . $targetName;
+        self::$heading = "Biaya per: " . $targetName;
 
-        // 3. HITUNG DATA
         $sums = [];
         $rows = $recap->recapRows()->get();
 
@@ -90,12 +99,10 @@ class RecapCostByLocationChart extends ChartWidget
             $amount = 0;
 
             foreach ($flatData as $key => $value) {
-                // Cek Label (Dimension)
                 if (Str::endsWith(strtolower($key), strtolower($targetName))) {
                     $label = $value ?: 'Tanpa Nama';
                 }
                 
-                // Cek Nilai (Metric Sum)
                 if (Str::endsWith(strtolower($key), strtolower($moneyCol->name))) {
                     $cleanVal = str_replace(['Rp', 'IDR', '.', ' '], '', $value);
                     $cleanVal = str_replace(',', '.', $cleanVal); 
@@ -115,7 +122,7 @@ class RecapCostByLocationChart extends ChartWidget
         return [
             'datasets' => [
                 [
-                    'label' => $moneyCol->name,
+                    'label' => 'Total (Rp)',
                     'data' => array_values($sums),
                     'backgroundColor' => [
                         '#3b82f6', '#ef4444', '#10b981', '#f59e0b', 
@@ -141,7 +148,10 @@ class RecapCostByLocationChart extends ChartWidget
             ],
         ],
         'cutout' => '60%',
-        'maintainAspectRatio' => false,
+        'maintainAspectRatio' => false, // Kunci agar tidak gepeng
+        'layout' => [
+            'padding' => 10
+        ]
     ];
 
     protected function getType(): string

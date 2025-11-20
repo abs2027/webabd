@@ -3,7 +3,6 @@
 namespace App\Filament\Resources\RecapResource\Pages;
 
 use App\Filament\Resources\RecapResource;
-use App\Filament\Resources\RecapResource\Widgets\RecapCostByLocationChart;
 use App\Filament\Resources\RecapTypeResource;
 use Filament\Actions;
 use Filament\Resources\Pages\ViewRecord;
@@ -13,6 +12,7 @@ use Illuminate\Contracts\Support\Htmlable;
 use App\Filament\Resources\RecapResource\Widgets\RecapStatsOverview;
 use App\Filament\Resources\RecapResource\Widgets\RecapTrendChart;
 use App\Filament\Resources\RecapResource\Widgets\RecapDistributionChart;
+use App\Filament\Resources\RecapResource\Widgets\RecapCostByLocationChart; // Jangan lupa import ini
 
 class ViewRecap extends ViewRecord
 {
@@ -23,22 +23,36 @@ class ViewRecap extends ViewRecord
         return 'Dashboard  - ' . $this->getRecord()->name;
     }
 
-    // ▼▼▼ PERBAIKAN: Hapus Action Edit di Header (Return array kosong) ▼▼▼
-    // Ini akan menghilangkan tombol biru "Ubah" di pojok kanan atas
     protected function getHeaderActions(): array
     {
-        return []; 
+        // Cek status Privacy Mode dari session
+        $isHidden = session()->get('privacy_mode', false);
+
+        return [
+            // Tombol Privacy Mode (Mata)
+            Actions\Action::make('toggle_privacy')
+                ->label($isHidden ? 'Tampilkan Angka' : 'Sensor Angka')
+                ->icon($isHidden ? 'heroicon-o-eye' : 'heroicon-o-eye-slash')
+                ->color('gray')
+                ->action(function () use ($isHidden) {
+                    session()->put('privacy_mode', !$isHidden);
+                    return redirect(request()->header('Referer'));
+                }),
+        ]; 
     }
-    // ▲▲▲ SELESAI HAPUS ▲▲▲
 
     protected function getHeaderWidgets(): array
     {
         return [
+            // 1. Statistik Utama (Kartu Angka)
             RecapStatsOverview::class,      
-             
-            RecapCostByLocationChart::class,      
+            
+            // 2. Grafik Tren (Garis) - Paling cocok lebar penuh
+            RecapTrendChart::class,   
+
+            // 3. Grafik Distribusi (Batang) & Biaya (Donut) - Berdampingan
             RecapDistributionChart::class,
-             RecapTrendChart::class,   
+            RecapCostByLocationChart::class,      
         ];
     }
 

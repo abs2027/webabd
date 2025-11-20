@@ -10,7 +10,7 @@ use Illuminate\Support\Str;
 class RecapDistributionChart extends ChartWidget
 {
     protected static ?string $heading = 'Frekuensi Data';
-    protected static ?string $maxHeight = '300px';
+    protected static ?string $maxHeight = '350px';
     
     public ?Model $record = null;
     public ?string $filter = null; 
@@ -102,7 +102,8 @@ class RecapDistributionChart extends ChartWidget
                     'borderColor' => '#3b82f6',
                     'borderWidth' => 1,
                     'borderRadius' => 4, 
-                    'barThickness' => 20, 
+                    'barThickness' => 25,
+                    'maxBarThickness' => 25,
                 ],
             ],
             'labels' => $labels,
