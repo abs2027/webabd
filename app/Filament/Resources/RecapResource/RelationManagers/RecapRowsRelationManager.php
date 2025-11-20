@@ -349,20 +349,6 @@ class RecapRowsRelationManager extends RelationManager
             ->filtersFormColumns(2) 
             ->filtersFormWidth('4xl')
             
-            // ▼▼▼ UPDATE: Tambah Badge agar sejajar dengan Filter (0) ▼▼▼
-            ->toggleColumnsTriggerAction(
-                fn (Action $action) => $action
-                    ->button()
-                    ->label('Select') // Label tombol
-                    ->badge(count($this->toggledTableColumns)) // Hitung kolom yang disembunyikan
-                    ->icon('heroicon-o-adjustments-horizontal')
-                    ->extraAttributes(['class' => 'order-1']) 
-            )
-            // ▲▲▲ ▲▲▲
-
-            ->filtersTriggerAction(fn (Action $action) => $action->button()->label('Filter')->icon('heroicon-o-funnel')->extraAttributes(['class' => 'order-2']))
-            ->actions([Tables\Actions\EditAction::make(), Tables\Actions\DeleteAction::make()])
-            ->bulkActions([Tables\Actions\BulkActionGroup::make([Tables\Actions\DeleteBulkAction::make()])])
             ->headerActions([
                 Tables\Actions\CreateAction::make()
                     ->label('Submit Rekapitulasi'),
@@ -490,6 +476,24 @@ class RecapRowsRelationManager extends RelationManager
                 ->icon('heroicon-m-ellipsis-vertical')
                 ->color('gray')         
                 ->button(),
-            ]);
+            ])
+            // ▼▼▼ PERBAIKAN POSISI DI SINI ▼▼▼
+            ->toggleColumnsTriggerAction(
+                fn (Action $action) => $action
+                    ->button()
+                    ->label('Select')
+                    ->icon('heroicon-o-adjustments-horizontal')
+                    ->extraAttributes(['class' => 'order-1']) // Order 1 = Kiri (Lebih dulu)
+            )
+            ->filtersTriggerAction(
+                fn (Action $action) => $action
+                    ->button()
+                    ->label('Filter')
+                    ->icon('heroicon-o-funnel')
+                    ->extraAttributes(['class' => 'order-2']) // Order 2 = Kanan (Setelahnya)
+            )
+            // ▲▲▲ SELESAI PERBAIKAN ▲▲▲
+            ->actions([Tables\Actions\EditAction::make(), Tables\Actions\DeleteAction::make()])
+            ->bulkActions([Tables\Actions\BulkActionGroup::make([Tables\Actions\DeleteBulkAction::make()])]);
     }
 }

@@ -6,6 +6,7 @@ use Filament\Widgets\StatsOverviewWidget as BaseWidget;
 use Filament\Widgets\StatsOverviewWidget\Stat;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Arr;
+use Carbon\Carbon;
 
 class RecapStatsOverview extends BaseWidget
 {
@@ -29,18 +30,64 @@ class RecapStatsOverview extends BaseWidget
             ->get();
 
         $rows = $recap->recapRows()->get();
-        $rowCount = $rows->count();
-
         $stats = []; 
 
-        // ▼▼▼ PERUBAHAN: KARTU "TOTAL DATA INPUT" PINDAH KE SINI (PERTAMA) ▼▼▼
-        $stats[] = Stat::make('Total Data Input', $rowCount . ' Baris')
-            ->description('Jumlah entri data')
-            ->descriptionIcon('heroicon-m-list-bullet')
-            ->color('primary');
-        // ▲▲▲ SELESAI DIPINDAHKAN ▲▲▲
+        // --- LOGIKA PROGRESS WAKTU (DIPERBAIKI) ---
+        $start = $recap->start_date ? Carbon::parse($recap->start_date)->startOfDay() : null;
+        $end = $recap->end_date ? Carbon::parse($recap->end_date)->endOfDay() : null;
+        $now = Carbon::now();
 
-        // BARU SETELAH ITU LOOPING KARTU LAINNYA (Orderan, Harga, dll)
+        if ($start && $end) {
+            $totalDays = $start->diffInDays($end) + 1; 
+            $isStarted = $now->greaterThanOrEqualTo($start);
+            $isFinished = $now->greaterThan($end);
+
+            if (!$isStarted) {
+                $percent = 0;
+                $desc = "Dimulai tgl " . $start->format('d M');
+                $color = 'gray';
+                $chart = [0, 0, 0, 0];
+            } elseif ($isFinished) {
+                $percent = 100;
+                $desc = "Periode Berakhir";
+                $color = 'danger'; 
+                $chart = [100, 100, 100, 100];
+            } else {
+                // Hitung hari berjalan
+                $daysPassed = $start->diffInDays($now) + 1;
+                
+                // ▼▼▼ PERBAIKAN DI SINI: Pakai round() biar gak ada koma ▼▼▼
+                $remainingDays = round($now->diffInDays($end)); 
+                // ▲▲▲ SELESAI ▲▲▲
+
+                $percent = min(100, round(($daysPassed / $totalDays) * 100));
+                
+                $desc = "Sisa {$remainingDays} hari lagi";
+                
+                if ($percent > 90) $color = 'danger'; 
+                elseif ($percent > 75) $color = 'warning'; 
+                else $color = 'success'; 
+
+                $chart = [];
+                for ($i=0; $i<=10; $i++) {
+                    $chart[] = ($i * 10) <= $percent ? ($i * 10) : null; 
+                }
+            }
+
+            $stats[] = Stat::make('Progress Periode', $percent . '%')
+                ->description($desc)
+                ->descriptionIcon('heroicon-m-clock')
+                ->chart($chart)
+                ->color($color);
+
+        } else {
+            $stats[] = Stat::make('Progress Periode', '-')
+                ->description('Set tanggal mulai & selesai')
+                ->descriptionIcon('heroicon-m-calendar')
+                ->color('gray');
+        }
+
+        // --- LOGIKA STATISTIK LAINNYA (TIDAK BERUBAH) ---
         foreach ($targetColumns as $column) {
             $totalValue = 0;
             $chartData = []; 
@@ -48,9 +95,7 @@ class RecapStatsOverview extends BaseWidget
             foreach ($rows as $row) {
                 $dataJSON = $row->data;
                 $flatData = Arr::dot($dataJSON);
-                
                 $foundValue = 0; 
-
                 foreach ($flatData as $key => $val) {
                     if (str_ends_with($key, $column->name)) {
                         $cleanVal = str_replace(['Rp', '.', ' '], '', $val);
@@ -59,7 +104,6 @@ class RecapStatsOverview extends BaseWidget
                         break; 
                     }
                 }
-
                 $totalValue += $foundValue;
                 $chartData[] = $foundValue; 
             }
@@ -72,9 +116,7 @@ class RecapStatsOverview extends BaseWidget
                 $icon = 'heroicon-m-calculator';
             }
 
-            $label = (stripos($column->name, 'Total') === 0) 
-                ? $column->name 
-                : 'Total ' . $column->name;
+            $label = (stripos($column->name, 'Total') === 0) ? $column->name : 'Total ' . $column->name;
 
             $stats[] = Stat::make($label, $formattedTotal)
                 ->description('Akumulasi ' . $column->name)
