@@ -24,7 +24,7 @@ use Filament\Tables\Actions\Action;
 use Illuminate\Support\Str;
 use Illuminate\Support\HtmlString; 
 use Illuminate\Support\Arr; 
-use Filament\Notifications\Notification; // Import Notifikasi
+use Filament\Notifications\Notification;
 
 class RecapRowsRelationManager extends RelationManager
 {
@@ -36,10 +36,8 @@ class RecapRowsRelationManager extends RelationManager
         return false;
     }
 
-    // ▼▼▼ FUNGSI BARU: COPY DARI HISTORY ▼▼▼
     public function copyFromHistory($rowId)
     {
-        // 1. Cari data berdasarkan ID
         $record = $this->getOwnerRecord()->recapRows()->find($rowId);
         
         if (!$record) {
@@ -47,20 +45,16 @@ class RecapRowsRelationManager extends RelationManager
             return;
         }
 
-        // 2. Isi Form yang sedang aktif (Mounted Form)
-        // Kita bungkus dengan key 'data' karena skema form kita menggunakan prefix 'data.'
         $this->getMountedTableActionForm()->fill([
             'data' => $record->data
         ]);
 
-        // 3. Beri notifikasi sukses
         Notification::make()
             ->title('Data disalin dari riwayat!')
             ->success()
             ->duration(2000)
             ->send();
     }
-    // ▲▲▲ SELESAI FUNGSI BARU ▲▲▲
 
     public function form(Form $form): Form
     {
@@ -73,12 +67,10 @@ class RecapRowsRelationManager extends RelationManager
         $recapType = $recap->recapType;
         $parentColumns = $recapType->recapColumns()->whereNull('parent_id')->orderBy('order')->get();
         
-        // 1. Generate Form Input Asli
         $formFields = $this->buildSchema($parentColumns, 'data'); 
 
-        // ▼▼▼ LOGIKA KONTEN CONTEKAN ▼▼▼
         $cheatSheetTop = Placeholder::make('latest_data_preview_top')
-            ->label('Riwayat Input Data (Klik baris untuk menyalin)') // Update Label
+            ->label('Riwayat Input Data (Klik baris untuk menyalin)')
             ->columnSpanFull()
             ->visible(fn ($operation) => $operation === 'create')
             ->content(function () use ($recap, $recapType) {
@@ -87,7 +79,6 @@ class RecapRowsRelationManager extends RelationManager
                     ->orderBy('order')
                     ->get();
 
-                // Ambil 5 data terakhir & balik urutan
                 $latestRows = $recap->recapRows()->latest()->take(5)->get()->reverse();
 
                 if ($latestRows->isEmpty()) {
@@ -115,7 +106,6 @@ class RecapRowsRelationManager extends RelationManager
                         $tds .= "<td class='px-3 py-1 border-b border-gray-200 dark:border-gray-700 whitespace-nowrap'>{$value}</td>";
                     }
                     
-                    // ▼▼▼ TAMBAHKAN wire:click DAN CURSOR POINTER DI SINI ▼▼▼
                     $rowsHtml .= "
                         <tr 
                             wire:click=\"copyFromHistory('{$row->id}')\" 
@@ -194,7 +184,12 @@ class RecapRowsRelationManager extends RelationManager
                     $isUsed = RecapColumn::where('operand_a', $column->name)->orWhere('operand_b', $column->name)->exists();
                     if ($isUsed) {
                         $isSelect = $column->type === 'select';
-                        $field->live(onBlur: !$isSelect)->afterStateUpdated(function (Get $get, Set $set) use ($currentKey, $cleanNumber) {
+                        
+                        // ▼▼▼ PERBAIKAN UTAMA ADA DI SINI ▼▼▼
+                        // Kita ganti onBlur menjadi debounce (tunggu 500ms setelah mengetik)
+                        // Jika tipe Select, biarkan normal (langsung). Jika teks/angka, pakai debounce.
+                        $field->live(debounce: $isSelect ? null : 500)
+                              ->afterStateUpdated(function (Get $get, Set $set) use ($currentKey, $cleanNumber) {
                              $parts = explode('.', $currentKey); $colName = array_pop($parts); $basePath = implode('.', $parts); 
                              $targets = RecapColumn::where('operand_a', $colName)->orWhere('operand_b', $colName)->get();
                              foreach($targets as $target) {
@@ -206,6 +201,7 @@ class RecapRowsRelationManager extends RelationManager
                                   $set($targetPath, $res);
                              }
                         });
+                        // ▲▲▲ SELESAI PERBAIKAN ▲▲▲
                     }
                 }
                 if ($field) { $schema[] = $field->label($column->name); }
@@ -248,28 +244,34 @@ class RecapRowsRelationManager extends RelationManager
                                     ->formatStateUsing(fn ($state) => $state ? "Lihat File" : "-")
                                     ->icon('heroicon-o-document');
                     break;
+                
                 case 'money':
                     $tableColumn = TextColumn::make($key)->label($column->name)->money('IDR', true);
                     if ($column->is_summarized) {
                         $tableColumn->summarize(
-                            Sum::make()->money('IDR', true)->label('Total ' . $column->name) 
+                            Sum::make()
+                                ->money('IDR', true)
+                                ->label(stripos($column->name, 'Total') === 0 ? $column->name : 'Total ' . $column->name) 
                                 ->using(function ($query) use ($jsonPath) {
                                     return $query->sum(DB::raw("CAST(JSON_UNQUOTE($jsonPath) AS DECIMAL(15, 2))"));
                                 })
                         );
                     }
                     break;
+
                 case 'number':
                      $tableColumn = TextColumn::make($key)->label($column->name)->numeric();
                      if ($column->is_summarized) {
                         $tableColumn->summarize(
-                            Sum::make()->label('Total ' . $column->name)
+                            Sum::make()
+                                ->label(stripos($column->name, 'Total') === 0 ? $column->name : 'Total ' . $column->name)
                                 ->using(function ($query) use ($jsonPath) {
                                     return $query->sum(DB::raw("CAST(JSON_UNQUOTE($jsonPath) AS DECIMAL(15, 2))"));
                                 })
                         );
                      }
                      break;
+                
                 default:
                     $tableColumn = TextColumn::make($key)->label($column->name);
                     $tableColumn->searchable(query: function ($query, string $search) use ($jsonPath) {
@@ -312,7 +314,6 @@ class RecapRowsRelationManager extends RelationManager
         return $table
             ->columns($tableColumns)
             ->filters($filters)
-            // ▼▼▼ 1. PENGATURAN LAYOUT FILTER ▼▼▼
             ->filtersFormColumns(2) 
             ->filtersFormWidth('4xl')
             
