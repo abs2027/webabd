@@ -63,7 +63,7 @@ class RecapRowsRelationManager extends RelationManager
         $parentColumns = $recapType->recapColumns()->whereNull('parent_id')->orderBy('order')->get();
         $formFields = $this->buildSchema($parentColumns, 'data'); 
 
-        $cheatSheetSection = Section::make('Riwayat Input Data')
+        $cheatSheetSection = Section::make('History')
             ->description('Klik untuk membuka/menutup riwayat data terakhir.')
             ->icon('heroicon-o-clock') 
             ->collapsible() 
@@ -310,7 +310,7 @@ class RecapRowsRelationManager extends RelationManager
                     });
                     break;
             }
-            
+            $tableColumn->sortable();
             $tableColumn->toggleable(); 
             $tableColumns[] = $tableColumn;
         }
@@ -344,14 +344,16 @@ class RecapRowsRelationManager extends RelationManager
         return $table
             ->striped() 
             ->groups($groups)
+            ->groupingSettingsInDropdownOnDesktop()
             ->columns($tableColumns)
             ->filters($filters)
-            ->filtersFormColumns(2) 
-            ->filtersFormWidth('4xl')
+            ->filtersFormColumns(1)
             
             ->headerActions([
                 Tables\Actions\CreateAction::make()
-                    ->label('Submit Rekapitulasi'),
+                    ->label('Submit Rekapitulasi')
+                    ->modalHeading('Submit Rekapitulasi') 
+                    ->createAnother(true),
 
                 ActionGroup::make([
                     
@@ -376,17 +378,26 @@ class RecapRowsRelationManager extends RelationManager
                         ->form([
                             FileUpload::make('file')
                                 ->label('File CSV')
-                                ->acceptedFileTypes(['text/csv', 'text/plain', 'application/vnd.ms-excel'])
+                                ->acceptedFileTypes(['text/csv', 'text/plain', 'application/vnd.ms-excel', 'application/csv'])
                                 ->required()
+                                ->helperText('Sistem akan otomatis membersihkan format Rp, Titik, dan Koma.')
                         ])
                         ->action(function (array $data) use ($recap, $recapType) {
                             $path = Storage::disk('public')->path($data['file']);
-                            $file = fopen($path, 'r');
-                            $headers = fgetcsv($file);
+                            $handle = fopen($path, 'r');
+                            $firstLine = fgets($handle);
+                            rewind($handle);
+                            $delimiter = (strpos($firstLine, ';') !== false) ? ';' : ',';
+
+                            $headers = fgetcsv($handle, 1000, $delimiter);
                             if (!$headers) {
                                 Notification::make()->title('File CSV kosong')->danger()->send();
                                 return;
                             }
+                            $headers = array_map(function($h) {
+                                return trim(preg_replace('/[\x00-\x1F\x80-\xFF]/', '', $h));
+                            }, $headers);
+
                             $allColumns = $recapType->recapColumns()->where('type', '!=', 'group')->get();
                             $columnMap = []; 
                             foreach ($allColumns as $col) {
@@ -395,8 +406,42 @@ class RecapRowsRelationManager extends RelationManager
                                 $dotPath = implode('.', $pathArr);
                                 $columnMap[strtolower(trim($col->name))] = [ 'path' => $dotPath, 'type' => $col->type ];
                             }
+
                             $importedCount = 0;
-                            while (($row = fgetcsv($file)) !== false) {
+                            
+                            // --- UPDATE: PEMBERSIH ANGKA IMPORT DENGAN DOUBLE DETECTOR (KOMA & TITIK) ---
+                            $cleanNumber = function($val) {
+                                $valStr = (string) $val;
+                                $valStr = preg_replace('/[^\d,.-]/', '', $valStr); 
+                                if ($valStr === '') return 0;
+
+                                // 1. Cek Pola Ribuan TITIK (10.000)
+                                if (preg_match('/^-?\d{1,3}(\.\d{3})+$/', $valStr)) {
+                                     return (float) str_replace('.', '', $valStr);
+                                }
+
+                                // 2. Cek Pola Ribuan KOMA (10,000) -> ANTISIPASI FORMAT US/EXCEL LAIN
+                                if (preg_match('/^-?\d{1,3}(,\d{3})+$/', $valStr)) {
+                                     return (float) str_replace(',', '', $valStr);
+                                }
+
+                                // 3. Fallback Logika
+                                $lastDot = strrpos($valStr, '.');
+                                $lastComma = strrpos($valStr, ',');
+                                
+                                // Format Indo: 10.000,00
+                                if ($lastComma !== false && ($lastDot === false || $lastComma > $lastDot)) {
+                                    $valStr = str_replace('.', '', $valStr);
+                                    $valStr = str_replace(',', '.', $valStr);
+                                } 
+                                // Format US: 10,000.00
+                                else {
+                                    $valStr = str_replace(',', '', $valStr);
+                                }
+                                return (float) $valStr;
+                            };
+
+                            while (($row = fgetcsv($handle, 1000, $delimiter)) !== false) {
                                 $rowDataJSON = [];
                                 $hasData = false;
                                 foreach ($row as $index => $value) {
@@ -407,28 +452,18 @@ class RecapRowsRelationManager extends RelationManager
                                         $jsonPath = $mapping['path'];
                                         $colType = $mapping['type'];
                                         $cleanVal = trim($value);
-                                        if (in_array($colType, ['money', 'number'])) {
-                                            $cleanVal = str_ireplace(['Rp', 'IDR', ' '], '', $cleanVal);
-                                            if (str_contains($cleanVal, '.') && !str_contains($cleanVal, ',')) {
-                                                $cleanVal = str_replace('.', '', $cleanVal);
-                                            } elseif (str_contains($cleanVal, ',')) {
-                                                $cleanVal = str_replace('.', '', $cleanVal); 
-                                                $cleanVal = str_replace(',', '.', $cleanVal); 
-                                            }
-                                            if (!is_numeric($cleanVal)) $cleanVal = 0;
+                                        
+                                        if (in_array($colType, ['money', 'number'])) { 
+                                            $cleanVal = $cleanNumber($value); 
                                         }
-                                        if ($cleanVal !== '') {
-                                            Arr::set($rowDataJSON, $jsonPath, $cleanVal);
-                                            $hasData = true;
-                                        }
+                                        
+                                        if ($colType == 'date' && strtotime($cleanVal)) { $cleanVal = date('Y-m-d', strtotime($cleanVal)); }
+                                        if ($cleanVal !== '' && $cleanVal !== null) { Arr::set($rowDataJSON, $jsonPath, $cleanVal); $hasData = true; }
                                     }
                                 }
-                                if ($hasData) {
-                                    $recap->recapRows()->create(['data' => $rowDataJSON]);
-                                    $importedCount++;
-                                }
+                                if ($hasData) { $recap->recapRows()->create(['data' => $rowDataJSON]); $importedCount++; }
                             }
-                            fclose($file);
+                            fclose($handle);
                             Notification::make()->title("Sukses! {$importedCount} data diimport.")->success()->send();
                         }),
 
@@ -437,31 +472,64 @@ class RecapRowsRelationManager extends RelationManager
                         ->icon('heroicon-o-arrow-down-tray')
                         ->color('gray')
                         ->action(function () use ($recap, $dataColumns) {
-                             $headers = $dataColumns->pluck('name')->toArray();
-                             array_unshift($headers, 'No'); 
-                             $rows = $recap->recapRows()->get(); 
-                             $callback = function () use ($headers, $rows, $dataColumns) {
-                                 $file = fopen('php://output', 'w');
-                                 fputcsv($file, $headers);
-                                 foreach ($rows as $index => $row) {
-                                     $rowData = [ $index + 1 ];
-                                     foreach ($dataColumns as $col) {
-                                         $value = $row->data;
-                                         $tempCol = $col; $path = [];
-                                         while ($tempCol != null) { array_unshift($path, $tempCol->name); $tempCol = $tempCol->parent; }
-                                         foreach ($path as $key) { $value = $value[$key] ?? null; }
-                                         if (is_array($value)) $value = json_encode($value);
-                                         $rowData[] = $value;
-                                     }
-                                     fputcsv($file, $rowData);
-                                 }
-                                 fclose($file);
-                             };
-                             $filename = 'Rekap-' . Str::slug($recap->name) . '.csv';
-                             return response()->stream($callback, 200, [
-                                 'Content-Type' => 'text/csv',
-                                 'Content-Disposition' => "attachment; filename=\"{$filename}\"",
-                             ]);
+                                $headers = $dataColumns->pluck('name')->toArray();
+                                array_unshift($headers, 'No');
+                                $rows = $recap->recapRows()->get();
+                                
+                                $callback = function () use ($headers, $rows, $dataColumns) {
+                                    $file = fopen('php://output', 'w');
+                                    fputcsv($file, $headers);
+                                    foreach ($rows as $index => $row) {
+                                        $rowData = [ $index + 1 ];
+                                        foreach ($dataColumns as $col) {
+                                            $value = $row->data;
+                                            $tempCol = $col; $path = [];
+                                            while ($tempCol != null) { array_unshift($path, $tempCol->name); $tempCol = $tempCol->parent; }
+                                            foreach ($path as $key) { $value = $value[$key] ?? null; }
+                                            
+                                            if (in_array($col->type, ['money', 'number'])) {
+                                                $valStr = (string) $value; 
+                                                
+                                                // Cek Pola Ribuan TITIK (10.000)
+                                                if (preg_match('/^-?\d{1,3}(\.\d{3})+$/', $valStr)) {
+                                                     $value = (float) str_replace('.', '', $valStr);
+                                                }
+                                                // Cek Pola Ribuan KOMA (10,000)
+                                                elseif (preg_match('/^-?\d{1,3}(,\d{3})+$/', $valStr)) {
+                                                     $value = (float) str_replace(',', '', $valStr);
+                                                }
+                                                elseif (is_numeric($value)) {
+                                                     $value = (float) $value;
+                                                }
+                                                else {
+                                                    $valStr = preg_replace('/[^\d,.-]/', '', $valStr);
+                                                    if ($valStr === '') { $value = 0; } 
+                                                    else {
+                                                        $lastComma = strrpos($valStr, ',');
+                                                        $lastDot = strrpos($valStr, '.');
+                                                        if ($lastComma !== false && ($lastDot === false || $lastComma > $lastDot)) {
+                                                            $valStr = str_replace('.', '', $valStr);
+                                                            $valStr = str_replace(',', '.', $valStr);
+                                                        } else {
+                                                            $valStr = str_replace(',', '', $valStr);
+                                                        }
+                                                        $value = (float) $valStr;
+                                                    }
+                                                }
+                                            }
+
+                                            if (is_array($value)) $value = json_encode($value);
+                                            $rowData[] = $value;
+                                        }
+                                        fputcsv($file, $rowData);
+                                    }
+                                    fclose($file);
+                                };
+                                $filename = 'Rekap-' . Str::slug($recap->name) . '.csv';
+                                return response()->stream($callback, 200, [
+                                    'Content-Type' => 'text/csv',
+                                    'Content-Disposition' => "attachment; filename=\"{$filename}\"",
+                                ]);
                         }),
 
                     Action::make('export_pdf')
@@ -475,24 +543,22 @@ class RecapRowsRelationManager extends RelationManager
                 ->label('Aksi Lainnya')
                 ->icon('heroicon-m-ellipsis-vertical')
                 ->color('gray')         
-                ->button(),
+                ->iconButton()
+                ->tooltip('Menu Aksi')
             ])
-            // ▼▼▼ PERBAIKAN POSISI DI SINI ▼▼▼
+            
             ->toggleColumnsTriggerAction(
                 fn (Action $action) => $action
-                    ->button()
-                    ->label('Select')
-                    ->icon('heroicon-o-adjustments-horizontal')
-                    ->extraAttributes(['class' => 'order-1']) // Order 1 = Kiri (Lebih dulu)
+                    ->iconButton()
+                    ->icon('heroicon-o-view-columns')
+                    ->label('Atur Kolom')
             )
             ->filtersTriggerAction(
                 fn (Action $action) => $action
-                    ->button()
-                    ->label('Filter')
+                    ->iconButton()
                     ->icon('heroicon-o-funnel')
-                    ->extraAttributes(['class' => 'order-2']) // Order 2 = Kanan (Setelahnya)
+                    ->label('Filter')
             )
-            // ▲▲▲ SELESAI PERBAIKAN ▲▲▲
             ->actions([Tables\Actions\EditAction::make(), Tables\Actions\DeleteAction::make()])
             ->bulkActions([Tables\Actions\BulkActionGroup::make([Tables\Actions\DeleteBulkAction::make()])]);
     }

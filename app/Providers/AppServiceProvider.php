@@ -19,6 +19,10 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        // ▼▼▼ TAMBAHKAN BARIS INI ▼▼▼
+        ini_set('memory_limit', '512M'); 
+        // ▲▲▲ SELESAI ▲▲▲
+        
+        // ... kode lain jika ada (misal Paginator, dll)
     }
 }

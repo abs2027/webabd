@@ -102,8 +102,6 @@ class RecapDistributionChart extends ChartWidget
                     'borderColor' => '#3b82f6',
                     'borderWidth' => 1,
                     'borderRadius' => 4, 
-                    'barThickness' => 25,
-                    'maxBarThickness' => 25,
                 ],
             ],
             'labels' => $labels,
