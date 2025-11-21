@@ -199,18 +199,47 @@
                         @php
                             $total = 0;
                             $hasTotal = false;
+                            
                             if ($col->is_summarized) {
                                 $hasTotal = true;
                                 foreach($rows as $r) {
+                                    // 1. Ambil Value
                                     $val = $r->data;
                                     $temp = $col;
                                     $p = [];
                                     while($temp) { array_unshift($p, $temp->name); $temp = $temp->parent; }
                                     foreach($p as $k) { $val = $val[$k] ?? 0; }
                                     
-                                    $val = str_replace(['Rp', '.', ' '], '', $val);
-                                    $val = str_replace(',', '.', $val);
-                                    $total += (float) $val;
+                                    // --- LOGIKA BARU (Sama dengan Export) ---
+                                    
+                                    // Cek 1: Jika Data sudah Angka Murni (140630.63 atau 10000)
+                                    // LANGSUNG TAMBAHKAN, JANGAN DIUTAK-ATIK!
+                                    if (is_numeric($val)) {
+                                        $total += (float) $val;
+                                    } 
+                                    // Cek 2: Jika Data berupa String Kotor (Jaga-jaga)
+                                    else {
+                                        $valStr = (string) $val;
+                                        $valStr = preg_replace('/[^\d,.-]/', '', $valStr);
+                                        
+                                        // Deteksi Pola Ribuan Titik (10.000)
+                                        if (preg_match('/^-?\d{1,3}(\.\d{3})+$/', $valStr)) {
+                                            $total += (float) str_replace('.', '', $valStr);
+                                        }
+                                        // Deteksi Format Indo (Koma di belakang)
+                                        else {
+                                            $lastComma = strrpos($valStr, ',');
+                                            $lastDot = strrpos($valStr, '.');
+                                            
+                                            if ($lastComma !== false && ($lastDot === false || $lastComma > $lastDot)) {
+                                                $valStr = str_replace('.', '', $valStr);
+                                                $valStr = str_replace(',', '.', $valStr);
+                                            } else {
+                                                $valStr = str_replace(',', '', $valStr);
+                                            }
+                                            $total += (float) $valStr;
+                                        }
+                                    }
                                 }
                             }
                         @endphp
