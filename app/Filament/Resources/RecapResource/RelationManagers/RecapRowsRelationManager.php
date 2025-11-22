@@ -357,6 +357,7 @@ class RecapRowsRelationManager extends RelationManager
 
                 ActionGroup::make([
                     
+                    // ▼▼▼ TOMBOL DOWNLOAD TEMPLATE LUAR (DENGAN CONTOH DATA) ▼▼▼
                     Action::make('download_template')
                         ->label('Download Template')
                         ->icon('heroicon-o-document-arrow-down')
@@ -364,18 +365,79 @@ class RecapRowsRelationManager extends RelationManager
                         ->action(function () use ($recap, $dataColumns) {
                             $filename = 'Template-' . Str::slug($recap->name) . '.csv';
                             $headers = $dataColumns->pluck('name')->toArray();
-                            return response()->streamDownload(function () use ($headers) {
+                            
+                            // BUAT BARIS CONTOH DATA
+                            $exampleRow = $dataColumns->map(function ($col) {
+                                return match ($col->type) {
+                                    'date' => date('Y-m-d'),
+                                    'money', 'number' => '1000',
+                                    'select' => $col->options ? trim(explode(',', $col->options)[0]) : 'Contoh Data',
+                                    default => 'Contoh ' . $col->name,
+                                };
+                            })->toArray();
+
+                            return response()->streamDownload(function () use ($headers, $exampleRow) {
                                 $file = fopen('php://output', 'w');
                                 fputcsv($file, $headers); 
+                                fputcsv($file, $exampleRow); // Masukkan contoh data
                                 fclose($file);
                             }, $filename);
                         }),
                     
+                    // ▼▼▼ TOMBOL UPLOAD DI DALAM MODAL (DENGAN CONTOH DATA) ▼▼▼
                     Action::make('import_csv')
                         ->label('Upload CSV')
                         ->icon('heroicon-o-arrow-up-tray')
                         ->color('primary')
+                        ->modalWidth('lg') 
                         ->form([
+                            Section::make('Panduan Pengisian & Template')
+                                ->description('Silakan unduh template dan baca panduan sebelum upload.')
+                                ->icon('heroicon-o-information-circle')
+                                ->collapsible()
+                                ->schema([
+                                    Placeholder::make('instructions')
+                                        ->hiddenLabel()
+                                        ->content(new HtmlString('
+                                            <div class="text-sm text-gray-600 dark:text-gray-300">
+                                                <ul class="list-disc list-inside space-y-1 mb-3 text-xs">
+                                                    <li><strong>Tanggal:</strong> Gunakan format <code>YYYY-MM-DD</code> (Contoh: 2025-12-31)</li>
+                                                    <li><strong>Angka/Uang:</strong> Tulis angka saja, tanpa "Rp" atau titik ribuan (Contoh: 1500000)</li>
+                                                    <li><strong>Pemisah (Delimiter):</strong> Gunakan Koma (,) atau Titik Koma (;)</li>
+                                                </ul>
+                                            </div>
+                                        ')),
+
+                                    Forms\Components\Actions::make([
+                                        Forms\Components\Actions\Action::make('download_template_inner')
+                                            ->label('Download Template CSV')
+                                            ->icon('heroicon-o-arrow-down-tray')
+                                            ->color('info')
+                                            ->size('sm')
+                                            ->action(function () use ($recap, $dataColumns) {
+                                                $filename = 'Template-' . Str::slug($recap->name) . '.csv';
+                                                $headers = $dataColumns->pluck('name')->toArray();
+
+                                                // BUAT BARIS CONTOH DATA
+                                                $exampleRow = $dataColumns->map(function ($col) {
+                                                    return match ($col->type) {
+                                                        'date' => date('Y-m-d'),
+                                                        'money', 'number' => '1000',
+                                                        'select' => $col->options ? trim(explode(',', $col->options)[0]) : 'Contoh Data',
+                                                        default => 'Contoh ' . $col->name,
+                                                    };
+                                                })->toArray();
+
+                                                return response()->streamDownload(function () use ($headers, $exampleRow) {
+                                                    $file = fopen('php://output', 'w');
+                                                    fputcsv($file, $headers); 
+                                                    fputcsv($file, $exampleRow); // Masukkan contoh data
+                                                    fclose($file);
+                                                }, $filename);
+                                            })
+                                    ]),
+                                ]),
+
                             FileUpload::make('file')
                                 ->label('File CSV')
                                 ->acceptedFileTypes(['text/csv', 'text/plain', 'application/vnd.ms-excel', 'application/csv'])
@@ -409,35 +471,17 @@ class RecapRowsRelationManager extends RelationManager
 
                             $importedCount = 0;
                             
-                            // --- UPDATE: PEMBERSIH ANGKA IMPORT DENGAN DOUBLE DETECTOR (KOMA & TITIK) ---
                             $cleanNumber = function($val) {
                                 $valStr = (string) $val;
                                 $valStr = preg_replace('/[^\d,.-]/', '', $valStr); 
                                 if ($valStr === '') return 0;
-
-                                // 1. Cek Pola Ribuan TITIK (10.000)
-                                if (preg_match('/^-?\d{1,3}(\.\d{3})+$/', $valStr)) {
-                                     return (float) str_replace('.', '', $valStr);
-                                }
-
-                                // 2. Cek Pola Ribuan KOMA (10,000) -> ANTISIPASI FORMAT US/EXCEL LAIN
-                                if (preg_match('/^-?\d{1,3}(,\d{3})+$/', $valStr)) {
-                                     return (float) str_replace(',', '', $valStr);
-                                }
-
-                                // 3. Fallback Logika
-                                $lastDot = strrpos($valStr, '.');
-                                $lastComma = strrpos($valStr, ',');
-                                
-                                // Format Indo: 10.000,00
+                                if (preg_match('/^-?\d{1,3}(\.\d{3})+$/', $valStr)) { return (float) str_replace('.', '', $valStr); }
+                                if (preg_match('/^-?\d{1,3}(,\d{3})+$/', $valStr)) { return (float) str_replace(',', '', $valStr); }
+                                $lastDot = strrpos($valStr, '.'); $lastComma = strrpos($valStr, ',');
                                 if ($lastComma !== false && ($lastDot === false || $lastComma > $lastDot)) {
                                     $valStr = str_replace('.', '', $valStr);
                                     $valStr = str_replace(',', '.', $valStr);
-                                } 
-                                // Format US: 10,000.00
-                                else {
-                                    $valStr = str_replace(',', '', $valStr);
-                                }
+                                } else { $valStr = str_replace(',', '', $valStr); }
                                 return (float) $valStr;
                             };
 
@@ -452,11 +496,7 @@ class RecapRowsRelationManager extends RelationManager
                                         $jsonPath = $mapping['path'];
                                         $colType = $mapping['type'];
                                         $cleanVal = trim($value);
-                                        
-                                        if (in_array($colType, ['money', 'number'])) { 
-                                            $cleanVal = $cleanNumber($value); 
-                                        }
-                                        
+                                        if (in_array($colType, ['money', 'number'])) { $cleanVal = $cleanNumber($value); }
                                         if ($colType == 'date' && strtotime($cleanVal)) { $cleanVal = date('Y-m-d', strtotime($cleanVal)); }
                                         if ($cleanVal !== '' && $cleanVal !== null) { Arr::set($rowDataJSON, $jsonPath, $cleanVal); $hasData = true; }
                                     }
@@ -489,35 +529,22 @@ class RecapRowsRelationManager extends RelationManager
                                             
                                             if (in_array($col->type, ['money', 'number'])) {
                                                 $valStr = (string) $value; 
-                                                
-                                                // Cek Pola Ribuan TITIK (10.000)
-                                                if (preg_match('/^-?\d{1,3}(\.\d{3})+$/', $valStr)) {
-                                                     $value = (float) str_replace('.', '', $valStr);
-                                                }
-                                                // Cek Pola Ribuan KOMA (10,000)
-                                                elseif (preg_match('/^-?\d{1,3}(,\d{3})+$/', $valStr)) {
-                                                     $value = (float) str_replace(',', '', $valStr);
-                                                }
-                                                elseif (is_numeric($value)) {
-                                                     $value = (float) $value;
-                                                }
+                                                if (preg_match('/^-?\d{1,3}(\.\d{3})+$/', $valStr)) { $value = (float) str_replace('.', '', $valStr); }
+                                                elseif (preg_match('/^-?\d{1,3}(,\d{3})+$/', $valStr)) { $value = (float) str_replace(',', '', $valStr); }
+                                                elseif (is_numeric($value)) { $value = (float) $value; }
                                                 else {
                                                     $valStr = preg_replace('/[^\d,.-]/', '', $valStr);
                                                     if ($valStr === '') { $value = 0; } 
                                                     else {
-                                                        $lastComma = strrpos($valStr, ',');
-                                                        $lastDot = strrpos($valStr, '.');
+                                                        $lastComma = strrpos($valStr, ','); $lastDot = strrpos($valStr, '.');
                                                         if ($lastComma !== false && ($lastDot === false || $lastComma > $lastDot)) {
                                                             $valStr = str_replace('.', '', $valStr);
                                                             $valStr = str_replace(',', '.', $valStr);
-                                                        } else {
-                                                            $valStr = str_replace(',', '', $valStr);
-                                                        }
+                                                        } else { $valStr = str_replace(',', '', $valStr); }
                                                         $value = (float) $valStr;
                                                     }
                                                 }
                                             }
-
                                             if (is_array($value)) $value = json_encode($value);
                                             $rowData[] = $value;
                                         }
