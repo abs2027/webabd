@@ -260,32 +260,66 @@ class RecapRowsRelationManager extends RelationManager
                                     ->icon('heroicon-o-document');
                     break;
                 
+                // ▼▼▼ BAGIAN UTAMA YANG DIPERBAIKI ▼▼▼
                 case 'money':
-                    $tableColumn = TextColumn::make($key)->label($column->name)->money('IDR', true);
+                case 'number':
+                    $tableColumn = TextColumn::make($key)->label($column->name);
+                    
+                    if ($column->type === 'money') {
+                        $tableColumn->money('IDR', true);
+                    } else {
+                        $tableColumn->numeric();
+                    }
+
                     if ($column->is_summarized) {
+                        $dotPathForSum = implode('.', $path); 
+
                         $tableColumn->summarize(
                             Sum::make()
-                                ->money('IDR', true)
-                                ->label(stripos($column->name, 'Total') === 0 ? $column->name : 'Total ' . $column->name) 
-                                ->using(function ($query) use ($jsonPath) {
-                                    return $query->sum(DB::raw("CAST(JSON_UNQUOTE($jsonPath) AS DECIMAL(15, 2))"));
+                                ->money($column->type === 'money' ? 'IDR' : null, true)
+                                ->label(stripos($column->name, 'Total') === 0 ? $column->name : 'Total ' . $column->name)
+                                ->using(function ($query) use ($dotPathForSum) {
+                                    // Gunakan ->get() agar PHP yang menghitung
+                                    return $query->get()->sum(function ($record) use ($dotPathForSum) {
+                                        
+                                        // ▼▼▼ FIX UTAMA: PASTIKAN DATA ADALAH ARRAY ▼▼▼
+                                        $data = $record->data;
+                                        if (is_string($data)) {
+                                            $data = json_decode($data, true); // Bongkar JSON string jadi Array
+                                        }
+                                        
+                                        // Ambil Value
+                                        $val = Arr::get($data, $dotPathForSum);
+                                        $valStr = (string) $val;
+                                        
+                                        // Gunakan Logika Pembersih Dashboard (Yang Terbukti Benar)
+                                        $valStr = preg_replace('/[^\d,.-]/', '', $valStr); 
+                                        if ($valStr === '') return 0;
+                                        
+                                        // Deteksi Ribuan Titik (Indo)
+                                        if (preg_match('/^-?\d{1,3}(\.\d{3})+$/', $valStr)) { return (float) str_replace('.', '', $valStr); }
+                                        // Deteksi Ribuan Koma (US)
+                                        if (preg_match('/^-?\d{1,3}(,\d{3})+$/', $valStr)) { return (float) str_replace(',', '', $valStr); }
+                                        
+                                        $lastDot = strrpos($valStr, '.'); 
+                                        $lastComma = strrpos($valStr, ',');
+                                        
+                                        // Format Indo (Koma di belakang) -> Ganti Koma jadi Titik
+                                        if ($lastComma !== false && ($lastDot === false || $lastComma > $lastDot)) {
+                                            $valStr = str_replace('.', '', $valStr);
+                                            $valStr = str_replace(',', '.', $valStr);
+                                        } else {
+                                            // Format US -> Hapus Koma
+                                            $valStr = str_replace(',', '', $valStr);
+                                        }
+                                        
+                                        return (float) $valStr;
+                                    });
                                 })
                         );
                     }
                     break;
-
-                case 'number':
-                     $tableColumn = TextColumn::make($key)->label($column->name)->numeric();
-                     if ($column->is_summarized) {
-                        $tableColumn->summarize(
-                            Sum::make()
-                                ->label(stripos($column->name, 'Total') === 0 ? $column->name : 'Total ' . $column->name)
-                                ->using(function ($query) use ($jsonPath) {
-                                    return $query->sum(DB::raw("CAST(JSON_UNQUOTE($jsonPath) AS DECIMAL(15, 2))"));
-                                })
-                        );
-                     }
-                     break;
+                // ▲▲▲ SELESAI PERBAIKAN ▲▲▲
                 
                 case 'select':
                     $tableColumn = TextColumn::make($key)->label($column->name);
@@ -357,7 +391,89 @@ class RecapRowsRelationManager extends RelationManager
 
                 ActionGroup::make([
                     
-                    // ▼▼▼ TOMBOL DOWNLOAD TEMPLATE LUAR (DENGAN CONTOH DATA) ▼▼▼
+                    Action::make('recalculate')
+                        ->label('Hitung Ulang Rumus')
+                        ->icon('heroicon-o-calculator')
+                        ->color('warning')
+                        ->requiresConfirmation()
+                        ->modalHeading('Hitung Ulang Semua Data?')
+                        ->modalDescription('Sistem akan menghitung ulang kolom yang memiliki rumus (misal: Total) berdasarkan data terbaru dan rumus yang aktif.')
+                        ->action(function () use ($recap, $recapType) {
+                            $allColumns = $recapType->recapColumns()->where('type', '!=', 'group')->get();
+                            $formulaColumns = [];
+                            $columnMap = [];
+
+                            foreach ($allColumns as $col) {
+                                $pathArr = []; $tempCol = $col;
+                                while ($tempCol != null) { array_unshift($pathArr, $tempCol->name); $tempCol = $tempCol->parent; }
+                                $dotPath = implode('.', $pathArr);
+                                $columnMap[strtolower(trim($col->name))] = ['path' => $dotPath, 'type' => $col->type];
+
+                                if ($col->operand_a && $col->operator && $col->operand_b) {
+                                    $formulaColumns[] = $col;
+                                }
+                            }
+
+                            if (empty($formulaColumns)) {
+                                Notification::make()->title('Tidak ada kolom rumus ditemukan.')->warning()->send();
+                                return;
+                            }
+
+                            $rows = $recap->recapRows()->get();
+                            $updatedCount = 0;
+                            
+                            $cleanNumber = function($val) {
+                                $valStr = (string) $val;
+                                $valStr = preg_replace('/[^\d,.-]/', '', $valStr); 
+                                if ($valStr === '') return 0;
+                                if (preg_match('/^-?\d{1,3}(\.\d{3})+$/', $valStr)) { return (float) str_replace('.', '', $valStr); }
+                                if (preg_match('/^-?\d{1,3}(,\d{3})+$/', $valStr)) { return (float) str_replace(',', '', $valStr); }
+                                $lastDot = strrpos($valStr, '.'); $lastComma = strrpos($valStr, ',');
+                                if ($lastComma !== false && ($lastDot === false || $lastComma > $lastDot)) {
+                                    $valStr = str_replace('.', '', $valStr);
+                                    $valStr = str_replace(',', '.', $valStr);
+                                } else { $valStr = str_replace(',', '', $valStr); }
+                                return (float) $valStr;
+                            };
+
+                            foreach ($rows as $row) {
+                                $data = $row->data;
+                                $isChanged = false;
+
+                                foreach ($formulaColumns as $fCol) {
+                                    $targetPath = $columnMap[strtolower(trim($fCol->name))]['path'] ?? null;
+                                    $pathA = $columnMap[strtolower(trim($fCol->operand_a))]['path'] ?? null;
+                                    $pathB = $columnMap[strtolower(trim($fCol->operand_b))]['path'] ?? null;
+
+                                    if ($targetPath && $pathA && $pathB) {
+                                        $valA = Arr::get($data, $pathA, 0);
+                                        $valB = Arr::get($data, $pathB, 0);
+
+                                        $numA = $cleanNumber($valA);
+                                        $numB = $cleanNumber($valB);
+
+                                        $result = 0;
+                                        switch ($fCol->operator) {
+                                            case '+': $result = $numA + $numB; break;
+                                            case '-': $result = $numA - $numB; break;
+                                            case '*': $result = $numA * $numB; break;
+                                            case '/': $result = ($numB != 0) ? $numA / $numB : 0; break;
+                                        }
+
+                                        Arr::set($data, $targetPath, $result);
+                                        $isChanged = true;
+                                    }
+                                }
+
+                                if ($isChanged) {
+                                    $row->update(['data' => $data]);
+                                    $updatedCount++;
+                                }
+                            }
+
+                            Notification::make()->title("Sukses! {$updatedCount} data berhasil dihitung ulang.")->success()->send();
+                        }),
+
                     Action::make('download_template')
                         ->label('Download Template')
                         ->icon('heroicon-o-document-arrow-down')
@@ -366,7 +482,6 @@ class RecapRowsRelationManager extends RelationManager
                             $filename = 'Template-' . Str::slug($recap->name) . '.csv';
                             $headers = $dataColumns->pluck('name')->toArray();
                             
-                            // BUAT BARIS CONTOH DATA
                             $exampleRow = $dataColumns->map(function ($col) {
                                 return match ($col->type) {
                                     'date' => date('Y-m-d'),
@@ -379,12 +494,11 @@ class RecapRowsRelationManager extends RelationManager
                             return response()->streamDownload(function () use ($headers, $exampleRow) {
                                 $file = fopen('php://output', 'w');
                                 fputcsv($file, $headers); 
-                                fputcsv($file, $exampleRow); // Masukkan contoh data
+                                fputcsv($file, $exampleRow); 
                                 fclose($file);
                             }, $filename);
                         }),
                     
-                    // ▼▼▼ TOMBOL UPLOAD DI DALAM MODAL (DENGAN CONTOH DATA) ▼▼▼
                     Action::make('import_csv')
                         ->label('Upload CSV')
                         ->icon('heroicon-o-arrow-up-tray')
@@ -410,7 +524,7 @@ class RecapRowsRelationManager extends RelationManager
 
                                     Forms\Components\Actions::make([
                                         Forms\Components\Actions\Action::make('download_template_inner')
-                                            ->label('Download Template CSV')
+                                            ->label('Download Template CSV (+Contoh)')
                                             ->icon('heroicon-o-arrow-down-tray')
                                             ->color('info')
                                             ->size('sm')
@@ -418,7 +532,6 @@ class RecapRowsRelationManager extends RelationManager
                                                 $filename = 'Template-' . Str::slug($recap->name) . '.csv';
                                                 $headers = $dataColumns->pluck('name')->toArray();
 
-                                                // BUAT BARIS CONTOH DATA
                                                 $exampleRow = $dataColumns->map(function ($col) {
                                                     return match ($col->type) {
                                                         'date' => date('Y-m-d'),
@@ -431,7 +544,7 @@ class RecapRowsRelationManager extends RelationManager
                                                 return response()->streamDownload(function () use ($headers, $exampleRow) {
                                                     $file = fopen('php://output', 'w');
                                                     fputcsv($file, $headers); 
-                                                    fputcsv($file, $exampleRow); // Masukkan contoh data
+                                                    fputcsv($file, $exampleRow); 
                                                     fclose($file);
                                                 }, $filename);
                                             })
@@ -462,11 +575,17 @@ class RecapRowsRelationManager extends RelationManager
 
                             $allColumns = $recapType->recapColumns()->where('type', '!=', 'group')->get();
                             $columnMap = []; 
+                            $formulaColumns = []; 
+                            
                             foreach ($allColumns as $col) {
                                 $pathArr = []; $tempCol = $col;
                                 while ($tempCol != null) { array_unshift($pathArr, $tempCol->name); $tempCol = $tempCol->parent; }
                                 $dotPath = implode('.', $pathArr);
-                                $columnMap[strtolower(trim($col->name))] = [ 'path' => $dotPath, 'type' => $col->type ];
+                                $columnMap[strtolower(trim($col->name))] = [ 'path' => $dotPath, 'type' => $col->type, 'name' => $col->name ];
+
+                                if ($col->operand_a && $col->operator && $col->operand_b) {
+                                    $formulaColumns[] = $col;
+                                }
                             }
 
                             $importedCount = 0;
@@ -488,6 +607,7 @@ class RecapRowsRelationManager extends RelationManager
                             while (($row = fgetcsv($handle, 1000, $delimiter)) !== false) {
                                 $rowDataJSON = [];
                                 $hasData = false;
+                                
                                 foreach ($row as $index => $value) {
                                     if (!isset($headers[$index])) continue;
                                     $headerName = strtolower(trim($headers[$index]));
@@ -501,62 +621,37 @@ class RecapRowsRelationManager extends RelationManager
                                         if ($cleanVal !== '' && $cleanVal !== null) { Arr::set($rowDataJSON, $jsonPath, $cleanVal); $hasData = true; }
                                     }
                                 }
+                                
+                                if ($hasData && !empty($formulaColumns)) {
+                                    foreach ($formulaColumns as $fCol) {
+                                        $targetPath = $columnMap[strtolower(trim($fCol->name))]['path'] ?? null;
+                                        $pathA = $columnMap[strtolower(trim($fCol->operand_a))]['path'] ?? null;
+                                        $pathB = $columnMap[strtolower(trim($fCol->operand_b))]['path'] ?? null;
+
+                                        if ($targetPath && $pathA && $pathB) {
+                                            $valA = Arr::get($rowDataJSON, $pathA, 0);
+                                            $valB = Arr::get($rowDataJSON, $pathB, 0);
+
+                                            $valA = is_numeric($valA) ? $valA : $cleanNumber($valA);
+                                            $valB = is_numeric($valB) ? $valB : $cleanNumber($valB);
+
+                                            $result = 0;
+                                            switch ($fCol->operator) {
+                                                case '+': $result = $valA + $valB; break;
+                                                case '-': $result = $valA - $valB; break;
+                                                case '*': $result = $valA * $valB; break;
+                                                case '/': $result = ($valB != 0) ? $valA / $valB : 0; break;
+                                            }
+                                            
+                                            Arr::set($rowDataJSON, $targetPath, $result);
+                                        }
+                                    }
+                                }
+
                                 if ($hasData) { $recap->recapRows()->create(['data' => $rowDataJSON]); $importedCount++; }
                             }
                             fclose($handle);
-                            Notification::make()->title("Sukses! {$importedCount} data diimport.")->success()->send();
-                        }),
-
-                    Action::make('export')
-                        ->label('Export Excel')
-                        ->icon('heroicon-o-arrow-down-tray')
-                        ->color('gray')
-                        ->action(function () use ($recap, $dataColumns) {
-                                $headers = $dataColumns->pluck('name')->toArray();
-                                array_unshift($headers, 'No');
-                                $rows = $recap->recapRows()->get();
-                                
-                                $callback = function () use ($headers, $rows, $dataColumns) {
-                                    $file = fopen('php://output', 'w');
-                                    fputcsv($file, $headers);
-                                    foreach ($rows as $index => $row) {
-                                        $rowData = [ $index + 1 ];
-                                        foreach ($dataColumns as $col) {
-                                            $value = $row->data;
-                                            $tempCol = $col; $path = [];
-                                            while ($tempCol != null) { array_unshift($path, $tempCol->name); $tempCol = $tempCol->parent; }
-                                            foreach ($path as $key) { $value = $value[$key] ?? null; }
-                                            
-                                            if (in_array($col->type, ['money', 'number'])) {
-                                                $valStr = (string) $value; 
-                                                if (preg_match('/^-?\d{1,3}(\.\d{3})+$/', $valStr)) { $value = (float) str_replace('.', '', $valStr); }
-                                                elseif (preg_match('/^-?\d{1,3}(,\d{3})+$/', $valStr)) { $value = (float) str_replace(',', '', $valStr); }
-                                                elseif (is_numeric($value)) { $value = (float) $value; }
-                                                else {
-                                                    $valStr = preg_replace('/[^\d,.-]/', '', $valStr);
-                                                    if ($valStr === '') { $value = 0; } 
-                                                    else {
-                                                        $lastComma = strrpos($valStr, ','); $lastDot = strrpos($valStr, '.');
-                                                        if ($lastComma !== false && ($lastDot === false || $lastComma > $lastDot)) {
-                                                            $valStr = str_replace('.', '', $valStr);
-                                                            $valStr = str_replace(',', '.', $valStr);
-                                                        } else { $valStr = str_replace(',', '', $valStr); }
-                                                        $value = (float) $valStr;
-                                                    }
-                                                }
-                                            }
-                                            if (is_array($value)) $value = json_encode($value);
-                                            $rowData[] = $value;
-                                        }
-                                        fputcsv($file, $rowData);
-                                    }
-                                    fclose($file);
-                                };
-                                $filename = 'Rekap-' . Str::slug($recap->name) . '.csv';
-                                return response()->stream($callback, 200, [
-                                    'Content-Type' => 'text/csv',
-                                    'Content-Disposition' => "attachment; filename=\"{$filename}\"",
-                                ]);
+                            Notification::make()->title("Sukses! {$importedCount} data diimport & rumus dihitung.")->success()->send();
                         }),
 
                     Action::make('export_pdf')
