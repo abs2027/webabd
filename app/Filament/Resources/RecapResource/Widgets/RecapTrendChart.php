@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Str;
 use Carbon\Carbon;
+use App\Helpers\RecapHelper; // Helper aktif
 
 class RecapTrendChart extends ChartWidget
 {
@@ -17,12 +18,10 @@ class RecapTrendChart extends ChartWidget
     public ?Model $record = null;
     public ?string $filter = null; 
 
-    // 1. ISI FILTER DENGAN KOLOM ROLE 'METRIC_SUM'
     protected function getFilters(): ?array
     {
         if (!$this->record) return [];
 
-        // Hanya ambil kolom yang jabatannya "Nilai Utama"
         return $this->record->recapType->recapColumns()
             ->where('role', 'metric_sum')
             ->orderBy('order')
@@ -39,16 +38,13 @@ class RecapTrendChart extends ChartWidget
         $recap = $this->record;
         $recapType = $recap->recapType;
 
-        // 2. TENTUKAN KOLOM YANG MAU DILIHAT TREN-NYA
         $targetName = $this->filter;
 
-        // Jika user belum pilih, ambil metric pertama (biasanya Total Harga/Orderan)
         if (!$targetName) {
             $firstColumn = $recapType->recapColumns()
                 ->where('role', 'metric_sum')
-                ->orderBy('order') // Ambil urutan paling atas atau sesuaikan
+                ->orderBy('order')
                 ->first();
-            
             $targetName = $firstColumn ? $firstColumn->name : null;
         }
 
@@ -58,27 +54,26 @@ class RecapTrendChart extends ChartWidget
 
         self::$heading = 'Tren: ' . $targetName;
 
-        // 3. CARI KOLOM TANGGAL (Untuk Sumbu X)
         $dateColumn = $recapType->recapColumns()->where('type', 'date')->first();
-        
-        $rows = $recap->recapRows()->get();
         
         $labels = [];
         $dataPoints = [];
+        $index = 1;
 
-        foreach ($rows as $index => $row) {
+        // OPTIMASI: Gunakan cursor()
+        foreach ($recap->recapRows()->cursor() as $row) {
             $dataJSON = $row->data;
-            $flatData = Arr::dot($dataJSON);
+            if(is_string($dataJSON)) $dataJSON = json_decode($dataJSON, true);
+            
+            $flatData = Arr::dot($dataJSON ?? []);
             
             $yValue = 0;
-            $xLabel = "Data #" . ($index + 1);
+            $xLabel = "Data #" . $index;
 
             foreach ($flatData as $key => $val) {
-                // Cari Nilai Y (Angka)
+                // Cari Nilai Y (Angka) - Gunakan Helper
                 if (Str::endsWith(strtolower($key), strtolower($targetName))) {
-                    $cleanVal = str_replace(['Rp', 'IDR', '.', ' '], '', $val);
-                    $cleanVal = str_replace(',', '.', $cleanVal);
-                    if (is_numeric($cleanVal)) $yValue = (float) $cleanVal;
+                    $yValue = RecapHelper::cleanNumber($val);
                 }
 
                 // Cari Nilai X (Tanggal)
@@ -93,6 +88,20 @@ class RecapTrendChart extends ChartWidget
 
             $labels[] = $xLabel;
             $dataPoints[] = $yValue;
+            $index++;
+        }
+
+        // Sampling jika data terlalu banyak agar chart tidak crash
+        if (count($dataPoints) > 100) {
+            $step = ceil(count($dataPoints) / 100); // Ambil maksimal 100 titik
+            $newLabels = [];
+            $newDataPoints = [];
+            for ($i = 0; $i < count($dataPoints); $i += $step) {
+                $newLabels[] = $labels[$i] ?? '';
+                $newDataPoints[] = $dataPoints[$i] ?? 0;
+            }
+            $labels = $newLabels;
+            $dataPoints = $newDataPoints;
         }
 
         return [

@@ -31,7 +31,7 @@ use Filament\Notifications\Notification;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Database\Eloquent\Builder; 
 use Illuminate\Database\Eloquent\Model; 
-use Carbon\Carbon; // Import Carbon untuk format tanggal
+use Carbon\Carbon; 
 
 class RecapRowsRelationManager extends RelationManager
 {
@@ -205,25 +205,18 @@ class RecapRowsRelationManager extends RelationManager
             $jsonPath = "data->'$." . $quotedPathStr . "'";
             $dotPath = implode('.', $path);
 
-            // Syntax SQL JSON
             $jsonColumnPath = str_replace('.', '->', $dotPath);
             $groupSqlKey = "data->{$jsonColumnPath}";
-            
-            // Cek apakah kolom ini bertipe DATE untuk formatting
             $isDate = $col->type === 'date';
 
             $groups[] = Group::make($groupSqlKey)
                 ->label($col->name)
                 ->getKeyFromRecordUsing(fn($record) => (string) (Arr::get($record->data, $dotPath) ?? '-'))
-                
-                // UPDATE VISUAL: Format Judul Grup Tanggal agar Cantik (02 Jun 2025)
                 ->getTitleFromRecordUsing(function($record) use ($dotPath, $isDate) {
                     $val = Arr::get($record->data, $dotPath);
                     if (!$val) return '-';
-                    // Jika tipe kolom date, format cantik. Jika bukan, tampilkan apa adanya.
                     return $isDate ? Carbon::parse($val)->format('d M Y') : (string) $val;
                 })
-
                 ->orderQueryUsing(fn (Builder $query, string $direction) => $query->orderByRaw("JSON_UNQUOTE($jsonPath) $direction"))
                 ->collapsible();
         }
@@ -234,7 +227,6 @@ class RecapRowsRelationManager extends RelationManager
             while ($tempCol != null) { array_unshift($path, $tempCol->name); $tempCol = $tempCol->parent; }
             $key = 'data.' . implode('.', $path);
             $dotPath = implode('.', $path);
-            
             $quotedPath = collect($path)->map(fn($segment) => '"' . $segment . '"')->join('.');
             $jsonPath = "data->'$." . $quotedPath . "'"; 
 
@@ -245,7 +237,6 @@ class RecapRowsRelationManager extends RelationManager
                         ->label($column->name)
                         ->formatStateUsing(fn ($state) => $state ? "Lihat File" : "-")
                         ->icon('heroicon-o-document')
-                        // UPDATE KEAMANAN: Pakai disk public secara eksplisit
                         ->url(fn ($state) => $state ? Storage::disk('public')->url($state) : null)
                         ->openUrlInNewTab()
                         ->color('primary');
@@ -377,31 +368,57 @@ class RecapRowsRelationManager extends RelationManager
                         ->requiresConfirmation()
                         ->action(function () use ($recap, $recapType) {
                             set_time_limit(0); 
+                            
+                            // FIX: Gunakan Normalizer agar konsisten dengan Import CSV
+                            $normalize = fn($str) => strtolower(str_replace(['_', '  '], [' ', ' '], trim(preg_replace('/[\x00-\x1F\x80-\xFF]/', '', $str))));
+
                             $allColumns = $recapType->recapColumns()->where('type', '!=', 'group')->get();
                             $formulaColumns = []; $columnMap = [];
+                            
                             foreach ($allColumns as $col) {
                                 $pathArr = []; $tempCol = $col;
                                 while ($tempCol != null) { array_unshift($pathArr, $tempCol->name); $tempCol = $tempCol->parent; }
-                                $columnMap[strtolower(trim($col->name))] = ['path' => implode('.', $pathArr), 'type' => $col->type];
+                                
+                                // GUNAKAN NORMALIZER KONSISTEN
+                                $normalizedColName = $normalize($col->name);
+                                $columnMap[$normalizedColName] = [
+                                    'path' => implode('.', $pathArr), 
+                                    'type' => $col->type,
+                                    'real_path_array' => $pathArr // Penting untuk rekonstruksi
+                                ];
+                                
                                 if ($col->operand_a && $col->operator && $col->operand_b) { $formulaColumns[] = $col; }
                             }
                             if (empty($formulaColumns)) { Notification::make()->title('Tidak ada rumus.')->warning()->send(); return; }
 
                             $updatedCount = 0;
-                            DB::transaction(function() use ($recap, $formulaColumns, $columnMap, &$updatedCount) {
-                                $recap->recapRows()->chunkById(200, function ($rows) use ($formulaColumns, $columnMap, &$updatedCount) {
+                            DB::transaction(function() use ($recap, $formulaColumns, $columnMap, &$updatedCount, $normalize) {
+                                $recap->recapRows()->chunkById(200, function ($rows) use ($formulaColumns, $columnMap, &$updatedCount, $normalize) {
                                     foreach ($rows as $row) {
                                         $data = $row->data;
                                         if (is_string($data)) $data = json_decode($data, true) ?? [];
                                         $isChanged = false;
                                         foreach ($formulaColumns as $fCol) {
-                                            $targetPath = $columnMap[strtolower(trim($fCol->name))]['path'] ?? null;
-                                            $pathA = $columnMap[strtolower(trim($fCol->operand_a))]['path'] ?? null;
-                                            $pathB = $columnMap[strtolower(trim($fCol->operand_b))]['path'] ?? null;
-                                            if ($targetPath && $pathA && $pathB) {
+                                            // CARI PAKAI NORMALIZED KEYS
+                                            $tKey = $normalize($fCol->name);
+                                            $aKey = $normalize($fCol->operand_a);
+                                            $bKey = $normalize($fCol->operand_b);
+
+                                            $targetMapping = $columnMap[$tKey] ?? null;
+                                            $mapA = $columnMap[$aKey] ?? null;
+                                            $mapB = $columnMap[$bKey] ?? null;
+
+                                            if ($targetMapping && $mapA && $mapB) {
+                                                // AMBIL DATA PAKAI PATH ASLI
+                                                $pathA = implode('.', $mapA['real_path_array']);
+                                                $pathB = implode('.', $mapB['real_path_array']);
+                                                
                                                 $numA = RecapHelper::getNumericValue($data, $pathA);
                                                 $numB = RecapHelper::getNumericValue($data, $pathB);
                                                 $result = match ($fCol->operator) { '+' => $numA + $numB, '-' => $numA - $numB, '*' => $numA * $numB, '/' => ($numB != 0) ? $numA / $numB : 0, default => 0 };
+                                                
+                                                // SIMPAN DATA PAKAI PATH ASLI
+                                                $targetPath = implode('.', $targetMapping['real_path_array']);
                                                 Arr::set($data, $targetPath, $result);
                                                 $isChanged = true;
                                             }
@@ -410,6 +427,7 @@ class RecapRowsRelationManager extends RelationManager
                                     }
                                 });
                             });
+                            
                             Notification::make()->title("Sukses! {$updatedCount} data dihitung ulang.")->success()->send();
                         }),
 
@@ -535,7 +553,12 @@ class RecapRowsRelationManager extends RelationManager
                                 $pathArr = []; $tempCol = $col;
                                 while ($tempCol != null) { array_unshift($pathArr, $tempCol->name); $tempCol = $tempCol->parent; }
                                 $normalizedColName = $normalize($col->name);
-                                $columnMap[$normalizedColName] = [ 'path' => implode('.', $pathArr), 'type' => $col->type ];
+                                // RESTORED FIX: Gunakan real_path_array untuk menyimpan data ke JSON dengan nama asli
+                                $columnMap[$normalizedColName] = [ 
+                                    'path' => implode('.', $pathArr), 
+                                    'type' => $col->type,
+                                    'real_path_array' => $pathArr 
+                                ];
                                 if ($col->operand_a && $col->operator && $col->operand_b) { $formulaColumns[] = $col; }
                             }
 
@@ -552,19 +575,34 @@ class RecapRowsRelationManager extends RelationManager
                                                 $cleanVal = trim($value);
                                                 if (in_array($mapping['type'], ['money', 'number'])) { $cleanVal = RecapHelper::cleanNumber($value); }
                                                 if ($mapping['type'] == 'date' && strtotime($cleanVal)) { $cleanVal = date('Y-m-d', strtotime($cleanVal)); }
-                                                if ($cleanVal !== '' && $cleanVal !== null) { Arr::set($rowDataJSON, $mapping['path'], $cleanVal); $hasData = true; }
+                                                
+                                                if ($cleanVal !== '' && $cleanVal !== null) { 
+                                                    // RESTORED FIX: Simpan menggunakan path asli
+                                                    Arr::set($rowDataJSON, implode('.', $mapping['real_path_array']), $cleanVal); 
+                                                    $hasData = true; 
+                                                }
                                             }
                                         }
                                         if ($hasData && !empty($formulaColumns)) {
                                             foreach ($formulaColumns as $fCol) {
-                                                $tPath = $columnMap[$normalize($fCol->name)]['path'] ?? null;
-                                                $pA = $columnMap[$normalize($fCol->operand_a)]['path'] ?? null;
-                                                $pB = $columnMap[$normalize($fCol->operand_b)]['path'] ?? null;
-                                                if ($tPath && $pA && $pB) {
-                                                    $valA = RecapHelper::getNumericValue($rowDataJSON, $pA);
-                                                    $valB = RecapHelper::getNumericValue($rowDataJSON, $pB);
+                                                $tKey = $normalize($fCol->name);
+                                                $aKey = $normalize($fCol->operand_a);
+                                                $bKey = $normalize($fCol->operand_b);
+
+                                                $targetMapping = $columnMap[$tKey] ?? null;
+                                                $mapA = $columnMap[$aKey] ?? null;
+                                                $mapB = $columnMap[$bKey] ?? null;
+
+                                                if ($targetMapping && $mapA && $mapB) {
+                                                    $pathA = implode('.', $mapA['real_path_array']);
+                                                    $pathB = implode('.', $mapB['real_path_array']);
+                                                    
+                                                    $valA = RecapHelper::getNumericValue($rowDataJSON, $pathA);
+                                                    $valB = RecapHelper::getNumericValue($rowDataJSON, $pathB);
                                                     $res = match ($fCol->operator) { '+' => $valA + $valB, '-' => $valA - $valB, '*' => $valA * $valB, '/' => ($valB != 0) ? $valA / $valB : 0, default => 0 };
-                                                    Arr::set($rowDataJSON, $tPath, $res);
+                                                    
+                                                    $targetPath = implode('.', $targetMapping['real_path_array']);
+                                                    Arr::set($rowDataJSON, $targetPath, $res);
                                                 }
                                             }
                                         }

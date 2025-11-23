@@ -15,19 +15,17 @@ class RecapDistributionChart extends ChartWidget
     public ?Model $record = null;
     public ?string $filter = null; 
 
-    // 1. FILTER HANYA KOLOM KATEGORI (DIMENSION)
     protected function getFilters(): ?array
     {
         if (!$this->record) return [];
 
         return $this->record->recapType->recapColumns()
-            ->where('role', 'dimension') // Hanya ambil yang role-nya Dimension
+            ->where('role', 'dimension')
             ->orderBy('order')
             ->pluck('name', 'name')
             ->toArray();
     }
 
-    // Konfigurasi Bar Chart Horizontal
     protected static ?array $options = [
         'indexAxis' => 'y', 
         'plugins' => [
@@ -49,10 +47,8 @@ class RecapDistributionChart extends ChartWidget
         $recap = $this->record;
         $recapType = $recap->recapType;
 
-        // 2. TENTUKAN KATEGORI
         $targetName = $this->filter;
 
-        // Jika kosong, ambil dimension pertama
         if (!$targetName) {
             $firstCol = $recapType->recapColumns()
                 ->where('role', 'dimension')
@@ -68,26 +64,33 @@ class RecapDistributionChart extends ChartWidget
         
         self::$heading = 'Frekuensi: ' . $targetName;
 
-        // 3. HITUNG JUMLAH KEMUNCULAN (COUNT)
-        $rows = $recap->recapRows()->get();
+        // OPTIMASI: Gunakan cursor()
         $distribution = [];
 
-        foreach ($rows as $row) {
+        foreach ($recap->recapRows()->cursor() as $row) {
             $dataJSON = $row->data;
-            $flatData = Arr::dot($dataJSON);
+            if(is_string($dataJSON)) $dataJSON = json_decode($dataJSON, true);
+            
+            $flatData = Arr::dot($dataJSON ?? []);
             
             foreach ($flatData as $key => $val) {
-                // Cek apakah key mengandung nama kolom target
                 if (Str::endsWith(strtolower($key), strtolower($targetName))) {
                     $label = $val ?: 'Tanpa Nama';
                     
                     if (!isset($distribution[$label])) {
                         $distribution[$label] = 0;
                     }
-                    $distribution[$label]++; // Hitung +1 (Frekuensi)
+                    $distribution[$label]++;
                     break;
                 }
             }
+        }
+
+        arsort($distribution); // Urutkan dari yang terbanyak
+        
+        // Batasi hanya Top 15 agar chart tidak kepanjangan
+        if (count($distribution) > 15) {
+            $distribution = array_slice($distribution, 0, 15, true);
         }
 
         $labels = array_keys($distribution);

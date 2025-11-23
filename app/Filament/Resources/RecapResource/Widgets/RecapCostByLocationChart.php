@@ -6,12 +6,11 @@ use Filament\Widgets\ChartWidget;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Str;
+use App\Helpers\RecapHelper; // Helper aktif
 
 class RecapCostByLocationChart extends ChartWidget
 {
     protected static ?string $heading = 'Proporsi Biaya';
-    
-    // Atur Max Height agar tidak terlalu tinggi
     protected static ?string $maxHeight = '150px';
     
     public ?Model $record = null;
@@ -63,23 +62,11 @@ class RecapCostByLocationChart extends ChartWidget
         
         if (!$targetName) {
             $defaultCol = $recap->recapType->recapColumns()
-                ->where('name', 'Tempat') 
+                ->whereIn('type', ['select', 'text'])
+                ->where('name', 'not like', '%Harga%')
+                ->where('name', 'not like', '%Total%')
+                ->orderBy('order')
                 ->first();
-            
-            if (!$defaultCol) {
-                $defaultCol = $recap->recapType->recapColumns()
-                    ->where('name', 'Shift') 
-                    ->first();
-            }
-
-            if (!$defaultCol) {
-                $defaultCol = $recap->recapType->recapColumns()
-                    ->whereIn('type', ['select', 'text'])
-                    ->where('name', 'not like', '%Harga%')
-                    ->where('name', 'not like', '%Total%')
-                    ->orderBy('order')
-                    ->first();
-            }
             $targetName = $defaultCol ? $defaultCol->name : null;
         }
 
@@ -90,23 +77,26 @@ class RecapCostByLocationChart extends ChartWidget
         self::$heading = "Biaya per: " . $targetName;
 
         $sums = [];
-        $rows = $recap->recapRows()->get();
-
-        foreach ($rows as $row) {
-            $flatData = Arr::dot($row->data ?? []);
+        
+        // OPTIMASI: Gunakan cursor() untuk looping hemat memori
+        foreach ($recap->recapRows()->cursor() as $row) {
+            $data = $row->data;
+            if(is_string($data)) $data = json_decode($data, true);
+            
+            $flatData = Arr::dot($data ?? []);
             
             $label = 'Lainnya'; 
             $amount = 0;
 
             foreach ($flatData as $key => $value) {
+                // Cari Label Kategori
                 if (Str::endsWith(strtolower($key), strtolower($targetName))) {
                     $label = $value ?: 'Tanpa Nama';
                 }
                 
+                // Cari Nilai Uang (Gunakan Helper)
                 if (Str::endsWith(strtolower($key), strtolower($moneyCol->name))) {
-                    $cleanVal = str_replace(['Rp', 'IDR', '.', ' '], '', $value);
-                    $cleanVal = str_replace(',', '.', $cleanVal); 
-                    if (is_numeric($cleanVal)) $amount = (float) $cleanVal;
+                    $amount = RecapHelper::cleanNumber($value);
                 }
             }
 
@@ -118,6 +108,14 @@ class RecapCostByLocationChart extends ChartWidget
 
         $sums = array_filter($sums, fn($val) => $val > 0);
         arsort($sums); 
+        
+        // Batasi irisan donut agar tidak terlalu penuh (Top 10 saja)
+        if (count($sums) > 10) {
+            $top10 = array_slice($sums, 0, 10, true);
+            $others = array_slice($sums, 10, null, true);
+            $top10['Lainnya'] = array_sum($others);
+            $sums = $top10;
+        }
 
         return [
             'datasets' => [
@@ -127,6 +125,7 @@ class RecapCostByLocationChart extends ChartWidget
                     'backgroundColor' => [
                         '#3b82f6', '#ef4444', '#10b981', '#f59e0b', 
                         '#8b5cf6', '#ec4899', '#6366f1', '#84cc16',
+                        '#06b6d4', '#f97316'
                     ],
                     'borderWidth' => 0, 
                     'hoverOffset' => 4,
@@ -148,7 +147,7 @@ class RecapCostByLocationChart extends ChartWidget
             ],
         ],
         'cutout' => '60%',
-        'maintainAspectRatio' => false, // Kunci agar tidak gepeng
+        'maintainAspectRatio' => false,
         'layout' => [
             'padding' => 10
         ]

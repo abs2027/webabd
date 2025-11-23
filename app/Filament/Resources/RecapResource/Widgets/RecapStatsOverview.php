@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Str;
 use Carbon\Carbon;
+use App\Helpers\RecapHelper; // Gunakan Helper
 
 class RecapStatsOverview extends BaseWidget
 {
@@ -22,15 +23,17 @@ class RecapStatsOverview extends BaseWidget
         }
 
         $recap = $this->record;
-        $recap->load('recapType');
         
-        // Hanya ambil kolom yang diset sebagai "Nilai Utama" (Metric Sum)
+        // Ambil kolom target (Metric Sum)
         $targetColumns = $recap->recapType->recapColumns()
             ->where('role', 'metric_sum')
             ->orderBy('order')
             ->get();
 
-        $rows = $recap->recapRows()->get();
+        // OPTIMASI MEMORI: Gunakan pluck('data') untuk mengambil JSON-nya saja, bukan Model lengkap
+        // Ini jauh lebih ringan daripada ->get()
+        $dataCollection = $recap->recapRows()->pluck('data'); 
+
         $stats = []; 
 
         // --- LOGIKA PROGRESS (Countdown) ---
@@ -55,7 +58,6 @@ class RecapStatsOverview extends BaseWidget
             } else {
                 $daysPassed = $start->diffInDays($now) + 1;
                 $percent = min(100, round(($daysPassed / $totalDuration) * 100));
-                $deadlineStr = $end->format('d M Y');
                 if ($diffDays == 0) { $desc = "Berakhir HARI INI"; $color = 'danger'; } 
                 elseif ($diffDays == 1) { $desc = "Berakhir BESOK"; $color = 'warning'; } 
                 else { $desc = "Sisa {$diffDays} hari"; if ($percent > 90) $color = 'danger'; elseif ($percent > 75) $color = 'warning'; else $color = 'success'; }
@@ -73,54 +75,19 @@ class RecapStatsOverview extends BaseWidget
             $totalValue = 0;
             $chartData = []; 
             
-            foreach ($rows as $row) {
-                $dataJSON = $row->data;
-                $flatData = Arr::dot($dataJSON);
-                $foundValue = 0; 
+            // Loop data tanpa membebani RAM (menggunakan dataCollection dari pluck di atas)
+            foreach ($dataCollection as $dataJSON) {
+                if (is_string($dataJSON)) $dataJSON = json_decode($dataJSON, true);
+                
+                // Gunakan Helper untuk mencari nilai angka di dalam JSON nested
+                // Helper ini otomatis membersihkan Rp, Titik, Koma, dan Tanda Kurung
+                $foundValue = RecapHelper::getNumericValue($dataJSON ?? [], $column->name);
 
-                foreach ($flatData as $key => $val) {
-                    // ▼▼▼ FILTER NAMA KOLOM (STRICT MODE) ▼▼▼
-                    // Pecah key: "data.Group.Debit" -> ["data", "Group", "Debit"]
-                    $keyParts = explode('.', $key);
-                    $actualName = end($keyParts); // Ambil "Debit"
-
-                    // Bandingkan "Debit" == "Debit" (Case Insensitive)
-                    if (strtolower(trim($actualName)) === strtolower(trim($column->name))) {
-                        
-                        // Bersihkan Format Angka (Indonesia/US)
-                        $valStr = (string) $val;
-                        $valStr = preg_replace('/[^\d,.-]/', '', $valStr); 
-                        
-                        if ($valStr !== '') {
-                            // Deteksi Ribuan Titik (Indo)
-                            if (preg_match('/^-?\d{1,3}(\.\d{3})+$/', $valStr)) { 
-                                $foundValue = (float) str_replace('.', '', $valStr); 
-                            }
-                            // Deteksi Ribuan Koma (US)
-                            elseif (preg_match('/^-?\d{1,3}(,\d{3})+$/', $valStr)) { 
-                                $foundValue = (float) str_replace(',', '', $valStr); 
-                            }
-                            // Campuran
-                            else {
-                                $lastDot = strrpos($valStr, '.'); 
-                                $lastComma = strrpos($valStr, ',');
-                                if ($lastComma !== false && ($lastDot === false || $lastComma > $lastDot)) {
-                                    // Format Indo (Koma di belakang) -> Ganti Koma jadi Titik
-                                    $valStr = str_replace('.', '', $valStr);
-                                    $valStr = str_replace(',', '.', $valStr);
-                                } else {
-                                    // Format US (Titik di belakang) -> Hapus Koma
-                                    $valStr = str_replace(',', '', $valStr);
-                                }
-                                $foundValue = (float) $valStr;
-                            }
-                        }
-                        break; // Sudah ketemu untuk baris ini? Lanjut baris berikutnya.
-                    }
-                    // ▲▲▲ SELESAI FILTER ▲▲▲
-                }
                 $totalValue += $foundValue;
-                $chartData[] = $foundValue; 
+                // Hanya simpan data chart jika tidak privacy mode (hemat memori array)
+                if (!$isPrivacyMode) {
+                    $chartData[] = $foundValue; 
+                }
             }
 
             // Format Tampilan Angka Widget
@@ -134,6 +101,14 @@ class RecapStatsOverview extends BaseWidget
                     $formattedTotal = number_format($totalValue, 0, ',', '.');
                     $icon = 'heroicon-m-calculator';
                 }
+            }
+
+            // Downsample chart data agar tidak terlalu berat merender ribuan titik di sparkline
+            // Ambil maksimal 50 titik sampel
+            if (count($chartData) > 50) {
+                $step = floor(count($chartData) / 50);
+                $chartData = array_filter($chartData, function($k) use ($step) { return $k % $step == 0; }, ARRAY_FILTER_USE_KEY);
+                $chartData = array_values($chartData);
             }
 
             $label = (stripos($column->name, 'Total') === 0) ? $column->name : 'Total ' . $column->name;
