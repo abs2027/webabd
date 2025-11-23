@@ -24,7 +24,7 @@ class RecapStatsOverview extends BaseWidget
         $stats = []; 
 
         // ---------------------------------------------------------
-        // 1. WIDGET PROGRESS
+        // 1. WIDGET PROGRESS (Countdown)
         // ---------------------------------------------------------
         $start = $recap->start_date ? Carbon::parse($recap->start_date)->startOfDay() : null;
         $end = $recap->end_date ? Carbon::parse($recap->end_date)->endOfDay() : null;
@@ -119,8 +119,8 @@ class RecapStatsOverview extends BaseWidget
         // 4. RENDER WIDGET
         // ---------------------------------------------------------
         
-        // Helper Tren: LOGIKA WARNA DIPERBARUI (STANDAR VISUAL)
-        $getTrendDesc = function($val1, $val2) {
+        // Helper Tren: TEKS LEBIH PENDEK (VISUAL CLEAN)
+        $getTrendDesc = function($val1, $val2, $isExpense = false) {
             if ($val1 == 0) return ['text' => 'Data baru', 'icon' => 'heroicon-m-sparkles', 'color' => 'primary'];
             
             $diff = $val2 - $val1; 
@@ -129,10 +129,11 @@ class RecapStatsOverview extends BaseWidget
             
             $icon = $isUp ? 'heroicon-m-arrow-trending-up' : 'heroicon-m-arrow-trending-down';
             
-            // UPDATE: Naik selalu Hijau, Turun selalu Merah
-            $color = $isUp ? 'success' : 'danger'; 
+            // Logika Warna: Expense Naik = Merah, Income Naik = Hijau
+            $color = $isUp ? ($isExpense ? 'danger' : 'success') : ($isExpense ? 'success' : 'danger');
             
-            $text = ($isUp ? "+" : "") . $percent . "% (vs Awal)";
+            // TEXT PENDEK: Agar tidak bertumpuk
+            $text = ($isUp ? "+" : "") . $percent . "%";
             
             return ['text' => $text, 'icon' => $icon, 'color' => $color];
         };
@@ -157,8 +158,8 @@ class RecapStatsOverview extends BaseWidget
                 }
             }
 
-            // Panggil helper tren baru (tanpa parameter $isExpense)
-            $trend = $getTrendDesc($info['half1'], $info['half2']);
+            $isExpense = Str::contains(strtolower($colName), ['kredit', 'credit', 'keluar', 'expense', 'rugi']);
+            $trend = $getTrendDesc($info['half1'], $info['half2'], $isExpense);
 
             $stats[] = Stat::make($colName, $formattedTotal)
                 ->description($trend['text'])
@@ -172,7 +173,7 @@ class RecapStatsOverview extends BaseWidget
             $formattedSaldo = $isPrivacyMode ? '******' : 'Rp ' . number_format($totalSaldoAkhir, 0, ',', '.');
             $saldoColor = $totalSaldoAkhir >= 0 ? 'success' : 'danger';
             $saldoIcon = $totalSaldoAkhir >= 0 ? 'heroicon-m-banknotes' : 'heroicon-m-exclamation-triangle';
-            $saldoDesc = $totalSaldoAkhir >= 0 ? 'Profit (Surplus)' : 'Rugi (Defisit)';
+            $saldoDesc = $totalSaldoAkhir >= 0 ? 'Profit' : 'Defisit';
 
             $stats[] = Stat::make('Sisa Saldo (Total)', $formattedSaldo)
                 ->description($saldoDesc)

@@ -12,7 +12,7 @@ use Illuminate\Contracts\Support\Htmlable;
 use App\Filament\Resources\RecapResource\Widgets\RecapStatsOverview;
 use App\Filament\Resources\RecapResource\Widgets\RecapTrendChart;
 use App\Filament\Resources\RecapResource\Widgets\RecapDistributionChart;
-use App\Filament\Resources\RecapResource\Widgets\RecapCostByLocationChart; // Jangan lupa import ini
+use App\Filament\Resources\RecapResource\Widgets\RecapCostByLocationChart;
 
 class ViewRecap extends ViewRecord
 {
@@ -52,7 +52,7 @@ class ViewRecap extends ViewRecord
 
             // 3. Grafik Distribusi (Batang) & Biaya (Donut) - Berdampingan
             RecapDistributionChart::class,
-            RecapCostByLocationChart::class,      
+            RecapCostByLocationChart::class, 
         ];
     }
 
