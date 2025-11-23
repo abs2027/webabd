@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Str;
 use Carbon\Carbon;
-use App\Helpers\RecapHelper; // Gunakan Helper
+use App\Helpers\RecapHelper; 
 
 class RecapStatsOverview extends BaseWidget
 {
@@ -18,25 +18,14 @@ class RecapStatsOverview extends BaseWidget
 
     protected function getStats(): array
     {
-        if (!$this->record) {
-            return [];
-        }
+        if (!$this->record) return [];
 
         $recap = $this->record;
-        
-        // Ambil kolom target (Metric Sum)
-        $targetColumns = $recap->recapType->recapColumns()
-            ->where('role', 'metric_sum')
-            ->orderBy('order')
-            ->get();
-
-        // OPTIMASI MEMORI: Gunakan pluck('data') untuk mengambil JSON-nya saja, bukan Model lengkap
-        // Ini jauh lebih ringan daripada ->get()
-        $dataCollection = $recap->recapRows()->pluck('data'); 
-
         $stats = []; 
 
-        // --- LOGIKA PROGRESS (Countdown) ---
+        // ---------------------------------------------------------
+        // 1. WIDGET PROGRESS
+        // ---------------------------------------------------------
         $start = $recap->start_date ? Carbon::parse($recap->start_date)->startOfDay() : null;
         $end = $recap->end_date ? Carbon::parse($recap->end_date)->endOfDay() : null;
         $now = Carbon::now(); 
@@ -45,78 +34,151 @@ class RecapStatsOverview extends BaseWidget
             $totalDuration = $start->diffInDays($end) + 1;
             $isStarted = $now->greaterThanOrEqualTo($start);
             $diffDays = $now->startOfDay()->diffInDays($end->startOfDay(), false);
+            $percent = ($isStarted && $diffDays >= 0) ? min(100, round(($start->diffInDays($now) + 1) / $totalDuration * 100)) : ($diffDays < 0 ? 100 : 0);
+            
+            $desc = !$isStarted ? "Mulai: " . $start->format('d M Y') : ($diffDays < 0 ? "Selesai (Lewat " . abs($diffDays) . " hari)" : "Sisa {$diffDays} hari");
+            $color = ($diffDays < 0 || ($percent > 90 && $diffDays >= 0)) ? 'danger' : (($percent > 75) ? 'warning' : 'success');
+            if (!$isStarted) $color = 'gray';
 
-            $percent = 0;
             $chart = [];
-            $color = 'success';
-            $desc = '';
-
-            if (!$isStarted) {
-                $percent = 0; $desc = "Mulai: " . $start->format('d M Y'); $color = 'gray'; $chart = [0, 0, 0, 0];
-            } elseif ($diffDays < 0) {
-                $percent = 100; $daysLate = abs($diffDays); $desc = "Selesai " . $end->format('d M') . " (Lewat {$daysLate} hari)"; $color = 'danger'; $chart = [100, 100, 100, 100];
-            } else {
-                $daysPassed = $start->diffInDays($now) + 1;
-                $percent = min(100, round(($daysPassed / $totalDuration) * 100));
-                if ($diffDays == 0) { $desc = "Berakhir HARI INI"; $color = 'danger'; } 
-                elseif ($diffDays == 1) { $desc = "Berakhir BESOK"; $color = 'warning'; } 
-                else { $desc = "Sisa {$diffDays} hari"; if ($percent > 90) $color = 'danger'; elseif ($percent > 75) $color = 'warning'; else $color = 'success'; }
-                for ($i=0; $i<=10; $i++) { $chart[] = ($i * 10) <= $percent ? ($i * 10) : null; }
-            }
+            for ($i=0; $i<=10; $i++) { $chart[] = ($i * 10) <= $percent ? ($i * 10) : null; }
+            
             $stats[] = Stat::make('Progress Periode', $percent . '%')->description($desc)->descriptionIcon('heroicon-m-clock')->chart($chart)->color($color);
         } else {
             $stats[] = Stat::make('Progress Periode', '-')->description('Atur Tanggal')->color('gray');
         }
 
-        // --- LOGIKA UTAMA (PERHITUNGAN ANGKA) ---
+        // ---------------------------------------------------------
+        // 2. PERSIAPAN DATA
+        // ---------------------------------------------------------
         $isPrivacyMode = session()->get('privacy_mode', false);
+        
+        $allMetricColumns = $recap->recapType->recapColumns()
+            ->where('role', 'metric_sum')
+            ->orderBy('order')
+            ->get();
 
-        foreach ($targetColumns as $column) {
-            $totalValue = 0;
-            $chartData = []; 
+        $colDebit = $allMetricColumns->first(fn($c) => Str::contains(strtolower($c->name), ['debit', 'masuk', 'pemasukan', 'income']));
+        $colCredit = $allMetricColumns->first(fn($c) => Str::contains(strtolower($c->name), ['credit', 'kredit', 'keluar', 'pengeluaran', 'expense']));
+        
+        $columnsData = [];
+        foreach ($allMetricColumns as $col) {
+            $columnsData[$col->name] = [
+                'total' => 0,
+                'chart' => [],
+                'obj' => $col,
+                'half1' => 0, 
+                'half2' => 0
+            ];
+        }
+
+        $chartTotalSaldo = []; 
+        $totalSaldoAkhir = 0;
+
+        $totalRows = $recap->recapRows()->count();
+        $chartStep = $totalRows > 50 ? floor($totalRows / 50) : 1;
+        $halfPoint = floor($totalRows / 2);
+        $rowIndex = 0;
+
+        // ---------------------------------------------------------
+        // 3. SINGLE PASS LOOP
+        // ---------------------------------------------------------
+        foreach ($recap->recapRows()->orderBy('id')->cursor() as $row) {
+            $dataJSON = $row->data;
+            if (is_string($dataJSON)) $dataJSON = json_decode($dataJSON, true) ?? [];
+
+            $valDebit = $colDebit ? RecapHelper::getNumericValue($dataJSON, $colDebit->name) : 0;
+            $valCredit = $colCredit ? RecapHelper::getNumericValue($dataJSON, $colCredit->name) : 0;
             
-            // Loop data tanpa membebani RAM (menggunakan dataCollection dari pluck di atas)
-            foreach ($dataCollection as $dataJSON) {
-                if (is_string($dataJSON)) $dataJSON = json_decode($dataJSON, true);
-                
-                // Gunakan Helper untuk mencari nilai angka di dalam JSON nested
-                // Helper ini otomatis membersihkan Rp, Titik, Koma, dan Tanda Kurung
-                $foundValue = RecapHelper::getNumericValue($dataJSON ?? [], $column->name);
+            $valSaldo = $valDebit - $valCredit;
+            $totalSaldoAkhir += $valSaldo;
 
-                $totalValue += $foundValue;
-                // Hanya simpan data chart jika tidak privacy mode (hemat memori array)
-                if (!$isPrivacyMode) {
-                    $chartData[] = $foundValue; 
+            foreach ($columnsData as $colName => &$info) {
+                $val = RecapHelper::getNumericValue($dataJSON, $colName);
+                $info['total'] += $val;
+
+                if ($rowIndex < $halfPoint) {
+                    $info['half1'] += $val;
+                } else {
+                    $info['half2'] += $val;
+                }
+                
+                if (!$isPrivacyMode && ($rowIndex % $chartStep === 0)) {
+                    $info['chart'][] = $val;
                 }
             }
 
-            // Format Tampilan Angka Widget
+            if (!$isPrivacyMode && ($rowIndex % $chartStep === 0)) {
+                $chartTotalSaldo[] = $totalSaldoAkhir;
+            }
+            
+            $rowIndex++;
+        }
+
+        // ---------------------------------------------------------
+        // 4. RENDER WIDGET
+        // ---------------------------------------------------------
+        
+        // Helper Tren: LOGIKA WARNA DIPERBARUI (STANDAR VISUAL)
+        $getTrendDesc = function($val1, $val2) {
+            if ($val1 == 0) return ['text' => 'Data baru', 'icon' => 'heroicon-m-sparkles', 'color' => 'primary'];
+            
+            $diff = $val2 - $val1; 
+            $percent = round(($diff / $val1) * 100);
+            $isUp = $percent > 0;
+            
+            $icon = $isUp ? 'heroicon-m-arrow-trending-up' : 'heroicon-m-arrow-trending-down';
+            
+            // UPDATE: Naik selalu Hijau, Turun selalu Merah
+            $color = $isUp ? 'success' : 'danger'; 
+            
+            $text = ($isUp ? "+" : "") . $percent . "% (vs Awal)";
+            
+            return ['text' => $text, 'icon' => $icon, 'color' => $color];
+        };
+
+        // A. Render Widget Kolom Asli
+        foreach ($columnsData as $colName => $info) {
+            if (Str::contains(strtolower($colName), ['total', 'saldo']) && $colDebit && $colCredit) {
+                continue; 
+            }
+
+            $totalValue = $info['total'];
+            $chartData = $info['chart'];
+            $column = $info['obj'];
+
             if ($isPrivacyMode) {
                 $formattedTotal = '******'; $chartData = [];
             } else {
-                if ($column->type === 'money' || Str::contains(strtolower($column->name), ['harga', 'biaya', 'total', 'rp', 'debit', 'credit'])) {
+                if ($column->type === 'money' || Str::contains(strtolower($colName), ['harga', 'biaya', 'total', 'rp', 'debit', 'credit', 'saldo'])) {
                     $formattedTotal = 'Rp ' . number_format($totalValue, 0, ',', '.');
-                    $icon = 'heroicon-m-banknotes';
                 } else {
                     $formattedTotal = number_format($totalValue, 0, ',', '.');
-                    $icon = 'heroicon-m-calculator';
                 }
             }
 
-            // Downsample chart data agar tidak terlalu berat merender ribuan titik di sparkline
-            // Ambil maksimal 50 titik sampel
-            if (count($chartData) > 50) {
-                $step = floor(count($chartData) / 50);
-                $chartData = array_filter($chartData, function($k) use ($step) { return $k % $step == 0; }, ARRAY_FILTER_USE_KEY);
-                $chartData = array_values($chartData);
-            }
+            // Panggil helper tren baru (tanpa parameter $isExpense)
+            $trend = $getTrendDesc($info['half1'], $info['half2']);
 
-            $label = (stripos($column->name, 'Total') === 0) ? $column->name : 'Total ' . $column->name;
-            $stats[] = Stat::make($label, $formattedTotal)
-                ->description('Akumulasi ' . $column->name)
-                ->descriptionIcon($icon ?? 'heroicon-m-chart-bar')
-                ->color('success')
+            $stats[] = Stat::make($colName, $formattedTotal)
+                ->description($trend['text'])
+                ->descriptionIcon($trend['icon'])
+                ->color($trend['color'])
                 ->chart($chartData); 
+        }
+
+        // B. Render Widget Saldo Akhir
+        if ($colDebit && $colCredit) {
+            $formattedSaldo = $isPrivacyMode ? '******' : 'Rp ' . number_format($totalSaldoAkhir, 0, ',', '.');
+            $saldoColor = $totalSaldoAkhir >= 0 ? 'success' : 'danger';
+            $saldoIcon = $totalSaldoAkhir >= 0 ? 'heroicon-m-banknotes' : 'heroicon-m-exclamation-triangle';
+            $saldoDesc = $totalSaldoAkhir >= 0 ? 'Profit (Surplus)' : 'Rugi (Defisit)';
+
+            $stats[] = Stat::make('Sisa Saldo (Total)', $formattedSaldo)
+                ->description($saldoDesc)
+                ->descriptionIcon($saldoIcon)
+                ->color($saldoColor)
+                ->chart($isPrivacyMode ? [] : $chartTotalSaldo);
         }
 
         return $stats;
