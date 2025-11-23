@@ -31,6 +31,7 @@ use Filament\Notifications\Notification;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Database\Eloquent\Builder; 
 use Illuminate\Database\Eloquent\Model; 
+use Carbon\Carbon; // Import Carbon untuk format tanggal
 
 class RecapRowsRelationManager extends RelationManager
 {
@@ -41,15 +42,8 @@ class RecapRowsRelationManager extends RelationManager
         return 'Detail Rekapitulasi - ' . $ownerRecord->name;
     }
 
-    // --- LOGIKA TUTUP BUKU (LOCKING) - STATUS: NONAKTIF (CATATAN) ---
     public function isReadOnly(): bool
     {
-        /*
-        $recap = $this->getOwnerRecord();
-        if ($recap->end_date && now()->diffInMonths($recap->end_date) > 1) {
-            return true; 
-        }
-        */
         return false; 
     }
     
@@ -72,7 +66,7 @@ class RecapRowsRelationManager extends RelationManager
         $parentColumns = $recapType->recapColumns()->whereNull('parent_id')->orderBy('order')->get();
         $formFields = $this->buildSchema($parentColumns, 'data'); 
 
-        $cheatSheetSection = Section::make('History')
+        $cheatSheetSection = Section::make('Riwayat Input Terakhir')
             ->description('Klik untuk membuka/menutup riwayat data terakhir.')
             ->icon('heroicon-o-clock') 
             ->collapsible() 
@@ -94,7 +88,6 @@ class RecapRowsRelationManager extends RelationManager
                         }
                         $headerHtml = '';
                         foreach ($previewColumns as $col) {
-                            // Visual: Header Rata Kanan untuk Angka
                             $align = in_array($col->type, ['money', 'number']) ? 'text-right' : 'text-left';
                             $headerHtml .= "<th class='px-3 py-2 {$align} whitespace-nowrap bg-gray-50 dark:bg-gray-800 border-b dark:border-gray-700 sticky top-0 z-10'>{$col->name}</th>";
                         }
@@ -111,7 +104,6 @@ class RecapRowsRelationManager extends RelationManager
                                         break;
                                     }
                                 }
-                                // Visual: Cell Rata Kanan untuk Angka
                                 $align = in_array($col->type, ['money', 'number']) ? 'text-right' : 'text-left';
                                 $tds .= "<td class='px-3 py-1 border-b border-gray-200 dark:border-gray-700 whitespace-nowrap {$align}'>{$value}</td>";
                             }
@@ -213,10 +205,26 @@ class RecapRowsRelationManager extends RelationManager
             $jsonPath = "data->'$." . $quotedPathStr . "'";
             $dotPath = implode('.', $path);
 
-            $groups[] = Group::make('group_col_' . $col->id)
+            // Syntax SQL JSON
+            $jsonColumnPath = str_replace('.', '->', $dotPath);
+            $groupSqlKey = "data->{$jsonColumnPath}";
+            
+            // Cek apakah kolom ini bertipe DATE untuk formatting
+            $isDate = $col->type === 'date';
+
+            $groups[] = Group::make($groupSqlKey)
                 ->label($col->name)
-                ->getTitleFromRecordUsing(fn($record) => Arr::get($record->data, $dotPath) ?? '-')
-                ->scopeQueryUsing(fn (Builder $query) => $query->orderByRaw("JSON_UNQUOTE($jsonPath)"))
+                ->getKeyFromRecordUsing(fn($record) => (string) (Arr::get($record->data, $dotPath) ?? '-'))
+                
+                // UPDATE VISUAL: Format Judul Grup Tanggal agar Cantik (02 Jun 2025)
+                ->getTitleFromRecordUsing(function($record) use ($dotPath, $isDate) {
+                    $val = Arr::get($record->data, $dotPath);
+                    if (!$val) return '-';
+                    // Jika tipe kolom date, format cantik. Jika bukan, tampilkan apa adanya.
+                    return $isDate ? Carbon::parse($val)->format('d M Y') : (string) $val;
+                })
+
+                ->orderQueryUsing(fn (Builder $query, string $direction) => $query->orderByRaw("JSON_UNQUOTE($jsonPath) $direction"))
                 ->collapsible();
         }
 
@@ -227,19 +235,18 @@ class RecapRowsRelationManager extends RelationManager
             $key = 'data.' . implode('.', $path);
             $dotPath = implode('.', $path);
             
-            // Path JSON untuk Query Database (Search & Sort)
             $quotedPath = collect($path)->map(fn($segment) => '"' . $segment . '"')->join('.');
             $jsonPath = "data->'$." . $quotedPath . "'"; 
 
             $tableColumn = null;
             switch ($column->type) {
                 case 'file':
-                    // UPDATE: Link File Bisa Diklik
                     $tableColumn = TextColumn::make($key)
                         ->label($column->name)
                         ->formatStateUsing(fn ($state) => $state ? "Lihat File" : "-")
                         ->icon('heroicon-o-document')
-                        ->url(fn ($state) => $state ? Storage::url($state) : null)
+                        // UPDATE KEAMANAN: Pakai disk public secara eksplisit
+                        ->url(fn ($state) => $state ? Storage::disk('public')->url($state) : null)
                         ->openUrlInNewTab()
                         ->color('primary');
                     break;
@@ -254,14 +261,13 @@ class RecapRowsRelationManager extends RelationManager
                     }
                     
                     $tableColumn
-                        ->alignEnd() // Rata Kanan
+                        ->alignEnd()
                         ->color(fn (string $state) => match (true) {
                             RecapHelper::cleanNumber($state) < 0 => 'danger',
                             RecapHelper::cleanNumber($state) > 0 => 'success',
                             default => 'gray',
                         });
 
-                    // UPDATE: Sorting Angka Akurat (Matematika)
                     $tableColumn->sortable(query: function (Builder $query, string $direction) use ($jsonPath) {
                         $query->orderByRaw("CAST(JSON_UNQUOTE($jsonPath) AS DECIMAL(15, 2)) $direction");
                     });
@@ -299,14 +305,12 @@ class RecapRowsRelationManager extends RelationManager
                                 ->using(fn ($query) => $query->sum(DB::raw("CAST(JSON_UNQUOTE($jsonPath) AS DECIMAL(15, 2))")))
                         );
                     }
-                    // Sorting Teks
                     $tableColumn->sortable(query: function (Builder $query, string $direction) use ($jsonPath) {
                         $query->orderByRaw("LOWER(JSON_UNQUOTE($jsonPath)) $direction");
                     });
                     break;
 
                 default:
-                    // UPDATE VISUAL: Wrap Text untuk kolom teks biasa agar rapi jika panjang
                     $tableColumn = TextColumn::make($key)
                         ->label($column->name)
                         ->wrap()
@@ -373,7 +377,6 @@ class RecapRowsRelationManager extends RelationManager
                         ->requiresConfirmation()
                         ->action(function () use ($recap, $recapType) {
                             set_time_limit(0); 
-                            
                             $allColumns = $recapType->recapColumns()->where('type', '!=', 'group')->get();
                             $formulaColumns = []; $columnMap = [];
                             foreach ($allColumns as $col) {
@@ -407,7 +410,6 @@ class RecapRowsRelationManager extends RelationManager
                                     }
                                 });
                             });
-                            
                             Notification::make()->title("Sukses! {$updatedCount} data dihitung ulang.")->success()->send();
                         }),
 
@@ -417,7 +419,6 @@ class RecapRowsRelationManager extends RelationManager
                         ->color('success')
                         ->action(function () use ($recap, $recapType) {
                             set_time_limit(0); 
-                            
                             $filename = 'Export-' . Str::slug($recap->name) . '-' . date('Y-m-d-His') . '.csv';
                             $columns = $recapType->recapColumns()->where('type', '!=', 'group')->orderBy('order')->get();
                             $headers = $columns->pluck('name')->toArray();
@@ -452,17 +453,17 @@ class RecapRowsRelationManager extends RelationManager
                             $exampleRow = $dataColumns->map(fn ($col) => match ($col->type) {
                                 'date' => date('Y-m-d'),
                                 'money', 'number' => '1000',
-                                default => 'Contoh Data',
+                                'select' => $col->options ? trim(explode(',', $col->options)[0]) : 'Contoh Data',
+                                default => 'Contoh ' . $col->name,
                             })->toArray();
                             return response()->streamDownload(fn () => fputcsv($file = fopen('php://output', 'w'), $headers) && fputcsv($file, $exampleRow) && fclose($file), $filename);
                         }),
                     
-                    // UPDATE: Tambahkan Panduan/Contekan di dalam Modal Import
                     Action::make('import_csv')
                         ->label('Upload CSV')
                         ->icon('heroicon-o-arrow-up-tray')
                         ->color('primary')
-                        ->modalWidth('lg') // Modal lebar agar panduan enak dibaca
+                        ->modalWidth('lg') 
                         ->form([
                             Section::make('Panduan Pengisian & Template')
                                 ->description('Silakan unduh template dan baca panduan sebelum upload.')
@@ -480,8 +481,6 @@ class RecapRowsRelationManager extends RelationManager
                                                 </ul>
                                             </div>
                                         ')),
-
-                                    // Tombol Download Template di dalam Modal
                                     Forms\Components\Actions::make([
                                         Forms\Components\Actions\Action::make('download_template_inner')
                                             ->label('Download Template CSV (+Contoh)')
@@ -491,7 +490,6 @@ class RecapRowsRelationManager extends RelationManager
                                             ->action(function () use ($recap, $dataColumns) {
                                                 $filename = 'Template-' . Str::slug($recap->name) . '.csv';
                                                 $headers = $dataColumns->pluck('name')->toArray();
-
                                                 $exampleRow = $dataColumns->map(function ($col) {
                                                     return match ($col->type) {
                                                         'date' => date('Y-m-d'),
@@ -500,7 +498,6 @@ class RecapRowsRelationManager extends RelationManager
                                                         default => 'Contoh ' . $col->name,
                                                     };
                                                 })->toArray();
-
                                                 return response()->streamDownload(function () use ($headers, $exampleRow) {
                                                     $file = fopen('php://output', 'w');
                                                     fputcsv($file, $headers); 
@@ -510,12 +507,10 @@ class RecapRowsRelationManager extends RelationManager
                                             })
                                     ]),
                                 ]),
-
                             FileUpload::make('file')
                                 ->label('File CSV')
                                 ->required()
                                 ->acceptedFileTypes(['text/csv', 'text/plain', 'application/vnd.ms-excel']),
-                            
                             Toggle::make('replace_existing')
                                 ->label('Hapus data yang sudah ada?')
                                 ->helperText('Hati-hati: Data lama akan dihapus permanen.')
